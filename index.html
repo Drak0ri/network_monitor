@@ -732,8 +732,12 @@ function removeTarget(i) {
 }
 
 function addTarget() {
+  const url = prompt('Enter the URL to monitor:', 'https://');
+  if (!url || !url.trim()) return;
+  const trimmedUrl = url.trim();
   const id = 'custom_' + Date.now();
-  cfg.targets.push({ id, name: 'New Target', url: 'https://', warnMs: 500, critMs: 2000, timeoutMs: 10000, note: '' });
+  const name = trimmedUrl.replace(/^https?:\/\//, '').replace(/\/$/, '') || 'New Target';
+  cfg.targets.push({ id, name, url: trimmedUrl, warnMs: 500, critMs: 2000, timeoutMs: 10000, note: '' });
   td[id] = { status:'unknown', latency:null, history:[], lastCheck:null, fails:0 };
   saveConfig(); renderAll(); renderSettings();
 }
