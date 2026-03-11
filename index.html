@@ -147,6 +147,14 @@
       margin-top: 6px; font-size: .66rem; color: var(--txt3);
     }
     .card-foot .cfails { color: var(--down); }
+    .card-note { font-size: .67rem; color: rgba(140,148,220,.65); margin-top: 3px; font-style: italic; line-height: 1.3; }
+    .card-rm-btn {
+      position: absolute; top: 8px; right: 8px;
+      background: none; border: none; color: var(--txt3); cursor: pointer;
+      font-size: .8rem; padding: 2px 5px; border-radius: 4px; opacity: 0; transition: opacity .15s, color .15s;
+    }
+    .card:hover .card-rm-btn { opacity: 1; }
+    .card-rm-btn:hover { color: var(--down); }
 
     /* ── SECTION HEADER ── */
     .sec-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
@@ -201,6 +209,8 @@
       border-bottom: 1px solid rgba(45,49,72,.4);
     }
     .tbl-row:last-child { border-bottom: none; }
+    .tbl-note-row { padding: 0 0 10px 0; border-bottom: 1px solid rgba(45,49,72,.4); }
+    .tbl-note-row:last-child { border-bottom: none; }
     .rm-btn {
       background: none; border: 1px solid rgba(220,38,38,.25);
       color: rgba(220,38,38,.5); border-radius: 4px; width: 24px; height: 24px;
@@ -259,6 +269,10 @@
   </div>
 
   <!-- TARGET CARDS -->
+  <div class="sec-hdr" style="margin-bottom:12px">
+    <span class="sec-title">Monitored Targets</span>
+    <button class="btn" onclick="addTarget()" style="font-size:.75rem">+ Add Target</button>
+  </div>
   <div class="grid" id="grid"></div>
 
   <!-- ALERT LOG -->
@@ -303,6 +317,7 @@
         <span>Name</span><span>URL</span><span>Warn ms</span><span>Crit ms</span><span></span>
       </div>
       <div id="tblRows"></div>
+      <p style="font-size:.68rem;color:var(--txt3);margin-top:8px">The note field appears on the monitoring card as a reminder of what each target measures.</p>
 
       <div class="future-note">
         <h4>Planned Notifications</h4>
@@ -323,10 +338,9 @@ const DEFAULTS = {
   schedule: { startHour: 7, startMin: 0, endHour: 17, endMin: 30 },
   historyMax: 60,
   targets: [
-    { id: 'google',      name: 'Internet (Google)',     url: 'https://www.google.com',       warnMs: 400,  critMs: 1500, timeoutMs: 8000  },
-    { id: 'cloudflare',  name: 'Internet (Cloudflare)', url: 'https://1.1.1.1',             warnMs: 200,  critMs: 800,  timeoutMs: 5000  },
-    { id: 'schoolsoft',  name: 'SchoolSoft',            url: 'https://sms.schoolsoft.se',   warnMs: 1000, critMs: 4000, timeoutMs: 12000 },
-    { id: 'microsoft',   name: 'Microsoft 365',         url: 'https://www.microsoft.com',   warnMs: 500,  critMs: 2000, timeoutMs: 8000  },
+    { id: 'google',     name: 'Internet (Google)',     url: 'https://www.google.com',                          warnMs: 400,  critMs: 1500, timeoutMs: 8000,  note: '' },
+    { id: 'cloudflare', name: 'Internet (Cloudflare)', url: 'https://1.1.1.1',                                warnMs: 200,  critMs: 800,  timeoutMs: 5000,  note: '' },
+    { id: 'schoolsoft', name: 'SchoolSoft',            url: 'https://sms.schoolsoft.se/engelska/jsp/Login.jsp', warnMs: 1000, critMs: 4000, timeoutMs: 12000, note: 'Login page response time — DDoS attacks and server overload slow this page directly' },
   ]
 };
 
@@ -594,11 +608,14 @@ function renderCards() {
     const up    = calcUptime(d.history);
     const trend = calcTrend(d.history);
     const ago   = d.lastCheck ? timeAgo(d.lastCheck) : 'Never';
+    const tIdx = cfg.targets.findIndex(x => x.id === t.id);
     card.innerHTML = `
+      <button class="card-rm-btn" onclick="removeTarget(${tIdx})" title="Remove this target">✕</button>
       <div class="card-head">
         <div>
           <div class="card-name">${esc(t.name)}</div>
           <div class="card-url">${esc(t.url)}</div>
+          ${t.note ? `<div class="card-note">${esc(t.note)}</div>` : ''}
         </div>
         <span class="badge ${d.status}">${d.status.toUpperCase()}</span>
       </div>
@@ -683,11 +700,14 @@ function renderSettings() {
   document.getElementById('sHistory').value  = cfg.historyMax;
   document.getElementById('tblRows').innerHTML = cfg.targets.map((t,i) => `
     <div class="tbl-row">
-      <input class="si" value="${esc(t.name)}"    onchange="updTarget(${i},'name',this.value)">
-      <input class="si" value="${esc(t.url)}"     onchange="updTarget(${i},'url',this.value)" placeholder="https://…">
-      <input class="si" type="number" value="${t.warnMs}"   onchange="updTarget(${i},'warnMs',+this.value)" min="50">
-      <input class="si" type="number" value="${t.critMs}"   onchange="updTarget(${i},'critMs',+this.value)"  min="100">
+      <input class="si" value="${esc(t.name)}"  onchange="updTarget(${i},'name',this.value)">
+      <input class="si" value="${esc(t.url)}"   onchange="updTarget(${i},'url',this.value)" placeholder="https://…">
+      <input class="si" type="number" value="${t.warnMs}" onchange="updTarget(${i},'warnMs',+this.value)" min="50">
+      <input class="si" type="number" value="${t.critMs}" onchange="updTarget(${i},'critMs',+this.value)"  min="100">
       <button class="rm-btn" onclick="removeTarget(${i})" title="Remove">✕</button>
+    </div>
+    <div class="tbl-note-row">
+      <input class="si" value="${esc(t.note||'')}" onchange="updTarget(${i},'note',this.value)" placeholder="Note (shown on card — e.g. what this target measures)" style="font-size:.75rem;color:var(--txt2)">
     </div>`).join('');
 }
 
@@ -713,7 +733,7 @@ function removeTarget(i) {
 
 function addTarget() {
   const id = 'custom_' + Date.now();
-  cfg.targets.push({ id, name: 'New Target', url: 'https://', warnMs: 500, critMs: 2000, timeoutMs: 10000 });
+  cfg.targets.push({ id, name: 'New Target', url: 'https://', warnMs: 500, critMs: 2000, timeoutMs: 10000, note: '' });
   td[id] = { status:'unknown', latency:null, history:[], lastCheck:null, fails:0 };
   saveConfig(); renderAll(); renderSettings();
 }
