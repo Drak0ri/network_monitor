@@ -296,6 +296,14 @@
           <input class="si" type="number" id="sInterval" min="10" max="3600" onchange="saveSetting('interval',this.value)">
         </div>
         <div class="sf">
+          <label class="sl">Randomize Interval</label>
+          <input type="checkbox" id="sRandomize" onchange="saveSetting('randomize',this.checked)" style="width:auto;margin-top:4px">
+        </div>
+        <div class="sf" id="sRandomizeMaxRow">
+          <label class="sl">Max Extra Delay (seconds)</label>
+          <input class="si" type="number" id="sRandomizeMax" min="1" max="3600" onchange="saveSetting('randomizeMax',this.value)">
+        </div>
+        <div class="sf">
           <label class="sl">Schedule Start (Mon–Fri)</label>
           <input class="si" type="time" id="sStart" onchange="saveSetting('start',this.value)">
         </div>
@@ -368,6 +376,8 @@
 // ═══════════════════════════════════════════════
 const DEFAULTS = {
   intervalMs: 60000,
+  randomizeInterval: false,
+  randomizeMaxMs: 60000,
   schedule: { startHour: 7, startMin: 0, endHour: 17, endMin: 30 },
   historyMax: 60,
   soundUrl: '',
@@ -471,8 +481,10 @@ function checkAllNow() {
 function schedNext() {
   clearTimeout(checkTimer);
   if (!inSchedule()) return;
-  countdownEnd = Date.now() + cfg.intervalMs;
-  checkTimer = setTimeout(checkAll, cfg.intervalMs);
+  const jitter = cfg.randomizeInterval ? Math.round(Math.random() * cfg.randomizeMaxMs) : 0;
+  const delay = cfg.intervalMs + jitter;
+  countdownEnd = Date.now() + delay;
+  checkTimer = setTimeout(checkAll, delay);
 }
 
 // ═══════════════════════════════════════════════
@@ -752,7 +764,10 @@ function toggleSettings() {
 }
 
 function renderSettings() {
-  document.getElementById('sInterval').value = cfg.intervalMs / 1000;
+  document.getElementById('sInterval').value      = cfg.intervalMs / 1000;
+  document.getElementById('sRandomize').checked   = cfg.randomizeInterval;
+  document.getElementById('sRandomizeMax').value  = cfg.randomizeMaxMs / 1000;
+  document.getElementById('sRandomizeMaxRow').style.display = cfg.randomizeInterval ? '' : 'none';
   document.getElementById('sStart').value    = `${p(cfg.schedule.startHour)}:${p(cfg.schedule.startMin)}`;
   document.getElementById('sEnd').value      = `${p(cfg.schedule.endHour)}:${p(cfg.schedule.endMin)}`;
   document.getElementById('sHistory').value  = cfg.historyMax;
@@ -772,6 +787,11 @@ function renderSettings() {
 
 function saveSetting(k, v) {
   if (k === 'interval') cfg.intervalMs = +v * 1000;
+  if (k === 'randomize') {
+    cfg.randomizeInterval = !!v;
+    document.getElementById('sRandomizeMaxRow').style.display = cfg.randomizeInterval ? '' : 'none';
+  }
+  if (k === 'randomizeMax') cfg.randomizeMaxMs = +v * 1000;
   if (k === 'start') { const [h,m]=v.split(':').map(Number); cfg.schedule.startHour=h; cfg.schedule.startMin=m; }
   if (k === 'end')   { const [h,m]=v.split(':').map(Number); cfg.schedule.endHour=h;   cfg.schedule.endMin=m; }
   if (k === 'history') cfg.historyMax = +v;
