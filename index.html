@@ -1,1 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Network Monitor</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --bg2: #1a1d27;
+      --bg3: #1e2130;
+      --bg3h: #252840;
+      --border: #2d3148;
+      --txt: #e2e8f0;
+      --txt2: #8892a4;
+      --txt3: #4a5568;
+      --up: #22c55e;
+      --slow: #f59e0b;
+      --crit: #ef4444;
+      --down: #dc2626;
+      --unk: #6b7280;
+      --accent: #6366f1;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--txt); min-height: 100vh; }
 
+    /* ── HEADER ── */
+    .hdr {
+      background: var(--bg2); border-bottom: 1px solid var(--border);
+      padding: 10px 20px; display: flex; align-items: center;
+      justify-content: space-between; flex-wrap: wrap; gap: 8px;
+      position: sticky; top: 0; z-index: 100;
+    }
+    .hdr-l { display: flex; align-items: center; gap: 12px; }
+    .hdr-title { font-size: 1rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+    .hdr-r { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+    .overall {
+      display: flex; align-items: center; gap: 7px;
+      padding: 3px 12px; border-radius: 20px;
+      font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+      border: 1px solid transparent;
+    }
+    .overall.up    { background: rgba(34,197,94,.12);  color: var(--up);   border-color: rgba(34,197,94,.25); }
+    .overall.slow  { background: rgba(245,158,11,.12); color: var(--slow); border-color: rgba(245,158,11,.25); }
+    .overall.down  { background: rgba(220,38,38,.12);  color: var(--down); border-color: rgba(220,38,38,.25); }
+    .overall.paused{ background: rgba(107,114,128,.1); color: var(--unk);  border-color: rgba(107,114,128,.2); }
+
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    .dot.pulse { animation: pulse 2s infinite; }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 currentColor; }
+      70%  { box-shadow: 0 0 0 6px transparent; }
+      100% { box-shadow: 0 0 0 0 transparent; }
+    }
+
+    /* ── BUTTONS ── */
+    .btn {
+      padding: 5px 13px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--bg3); color: var(--txt); font-size: .78rem; cursor: pointer;
+      transition: all .15s; font-weight: 500; white-space: nowrap;
+    }
+    .btn:hover { background: var(--bg3h); border-color: var(--accent); }
+    .btn.on  { background: rgba(99,102,241,.12); border-color: var(--accent); color: var(--accent); }
+    .btn.red { border-color: rgba(220,38,38,.3); color: rgba(220,38,38,.7); }
+    .btn.red:hover { background: rgba(220,38,38,.1); color: var(--down); }
+
+    /* ── SCHEDULE BAR ── */
+    .sched-bar {
+      background: var(--bg2); border-bottom: 1px solid var(--border);
+      padding: 5px 20px; display: flex; align-items: center;
+      justify-content: space-between; font-size: .72rem; color: var(--txt2);
+      flex-wrap: wrap; gap: 4px;
+    }
+    .sched-bar.off { color: var(--txt3); background: rgba(107,114,128,.05); }
+
+    /* ── PAUSED BANNER ── */
+    .pause-banner {
+      background: rgba(107,114,128,.07); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 16px; margin: 14px 20px 0;
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: .82rem; color: var(--txt2); gap: 10px; flex-wrap: wrap;
+    }
+    .pause-banner.hidden { display: none; }
+
+    /* ── MAIN ── */
+    main { padding: 18px 20px; }
+
+    /* ── TARGET CARDS ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+      gap: 14px; margin-bottom: 18px;
+    }
+    .card {
+      background: var(--bg3); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px; position: relative; overflow: hidden; transition: border-color .2s;
+    }
+    .card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      background: var(--card-bar, var(--border)); transition: background .3s;
+    }
+    .card.up      { --card-bar: var(--up); }
+    .card.slow    { --card-bar: var(--slow); }
+    .card.critical{ --card-bar: var(--crit); }
+    .card.down,
+    .card.timeout { --card-bar: var(--down); }
+    .card.checking { animation: blink 1s infinite; }
+    @keyframes blink { 50% { opacity: .55; } }
+
+    .card-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
+    .card-name { font-weight: 600; font-size: .95rem; }
+    .card-url  { font-size: .68rem; color: var(--txt3); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 175px; }
+
+    .badge {
+      padding: 2px 9px; border-radius: 20px; font-size: .68rem;
+      font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+      border: 1px solid transparent; flex-shrink: 0;
+    }
+    .badge.up      { background: rgba(34,197,94,.12);  color: var(--up);   border-color: rgba(34,197,94,.2); }
+    .badge.slow    { background: rgba(245,158,11,.12); color: var(--slow); border-color: rgba(245,158,11,.2); }
+    .badge.critical{ background: rgba(239,68,68,.12);  color: var(--crit); border-color: rgba(239,68,68,.2); }
+    .badge.down,
+    .badge.timeout { background: rgba(220,38,38,.12);  color: var(--down); border-color: rgba(220,38,38,.2); }
+    .badge.unknown { background: rgba(107,114,128,.1); color: var(--unk);  border-color: rgba(107,114,128,.2); }
+
+    .lat-row { display: flex; align-items: baseline; gap: 5px; margin-bottom: 8px; }
+    .lat-val { font-size: 1.9rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+    .lat-val.up      { color: var(--up); }
+    .lat-val.slow    { color: var(--slow); }
+    .lat-val.critical,
+    .lat-val.down,
+    .lat-val.timeout { color: var(--down); }
+    .lat-val.unknown { color: var(--txt3); }
+    .lat-unit  { font-size: .78rem; color: var(--txt2); }
+    .lat-trend { font-size: .82rem; margin-left: auto; }
+
+    .stats-row { display: flex; gap: 10px; margin-bottom: 8px; font-size: .68rem; }
+    .stat { display: flex; flex-direction: column; gap: 1px; }
+    .stat-lbl { color: var(--txt3); font-size: .62rem; text-transform: uppercase; letter-spacing: .05em; }
+    .stat-val { color: var(--txt2); font-variant-numeric: tabular-nums; }
+
+    .spark svg { width: 100%; height: 38px; display: block; }
+
+    .card-foot {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 6px; font-size: .66rem; color: var(--txt3);
+    }
+    .card-foot .cfails { color: var(--down); }
+
+    /* ── SECTION HEADER ── */
+    .sec-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .sec-title { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--txt2); }
+
+    /* ── ALERT LOG ── */
+    .alert-log {
+      background: var(--bg3); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px; margin-bottom: 18px; max-height: 210px; overflow-y: auto;
+    }
+    .alert-log:empty::after { content: 'No alerts yet'; color: var(--txt3); font-size: .78rem; }
+    .a-entry { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid rgba(45,49,72,.4); font-size: .78rem; }
+    .a-entry:last-child { border-bottom: none; }
+    .a-time { color: var(--txt3); font-size: .68rem; font-variant-numeric: tabular-nums; min-width: 55px; }
+    .a-dot  { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .a-txt  { color: var(--txt2); }
+    .a-txt strong { color: var(--txt); }
+    .a-was  { color: var(--txt3); }
+
+    /* ── SETTINGS ── */
+    .settings {
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 10px; margin-bottom: 18px; overflow: hidden;
+    }
+    .settings-tog {
+      width: 100%; padding: 11px 16px; background: none; border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: space-between;
+      color: var(--txt2); font-size: .72rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .1em;
+    }
+    .settings-tog:hover { color: var(--txt); }
+    .settings-body { display: none; padding: 16px; border-top: 1px solid var(--border); }
+    .settings-body.open { display: block; }
+
+    .sg { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .sf { display: flex; flex-direction: column; gap: 4px; }
+    .sl { font-size: .68rem; color: var(--txt2); text-transform: uppercase; letter-spacing: .05em; }
+    .si {
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 5px;
+      padding: 5px 9px; color: var(--txt); font-size: .82rem; width: 100%;
+    }
+    .si:focus { outline: none; border-color: var(--accent); }
+
+    .tbl-hdr {
+      display: grid; grid-template-columns: 1.1fr 2fr 70px 70px 26px;
+      gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border);
+      font-size: .62rem; text-transform: uppercase; letter-spacing: .05em; color: var(--txt3);
+    }
+    .tbl-row {
+      display: grid; grid-template-columns: 1.1fr 2fr 70px 70px 26px;
+      gap: 8px; align-items: center; padding: 6px 0;
+      border-bottom: 1px solid rgba(45,49,72,.4);
+    }
+    .tbl-row:last-child { border-bottom: none; }
+    .rm-btn {
+      background: none; border: 1px solid rgba(220,38,38,.25);
+      color: rgba(220,38,38,.5); border-radius: 4px; width: 24px; height: 24px;
+      cursor: pointer; font-size: .85rem; display: flex; align-items: center; justify-content: center;
+      transition: all .15s;
+    }
+    .rm-btn:hover { background: rgba(220,38,38,.1); color: var(--down); border-color: var(--down); }
+
+    .future-note {
+      margin-top: 14px; padding: 10px 12px;
+      background: rgba(99,102,241,.04); border: 1px dashed rgba(99,102,241,.2);
+      border-radius: 7px; font-size: .73rem; color: var(--txt3);
+    }
+    .future-note h4 { color: rgba(99,102,241,.55); font-size: .68rem; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 5px; }
+
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg2); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="hdr">
+  <div class="hdr-l">
+    <h1 class="hdr-title">Network Monitor</h1>
+    <div class="overall paused" id="overallStatus">
+      <div class="dot" id="overallDot"></div>
+      <span id="overallTxt">Starting…</span>
+    </div>
+  </div>
+  <div class="hdr-r">
+    <span style="font-size:.72rem;color:var(--txt3)" id="timerTxt"></span>
+    <button class="btn" onclick="checkAllNow()">Check Now</button>
+    <button class="btn" id="muteBtn" onclick="toggleMute()">🔔 Sound On</button>
+    <button class="btn on" id="forceBtn" onclick="toggleForce()" style="display:none">⚡ Override</button>
+  </div>
+</header>
+
+<!-- SCHEDULE BAR -->
+<div class="sched-bar" id="schedBar">
+  <div>
+    <span id="schedStatus"></span>
+    &nbsp;&nbsp;
+    <span id="clockTxt" style="font-variant-numeric:tabular-nums"></span>
+  </div>
+  <span id="nextEvt"></span>
+</div>
+
+<main>
+
+  <!-- PAUSED BANNER -->
+  <div class="pause-banner hidden" id="pauseBanner">
+    <span>⏸ Monitoring paused — outside school hours (Mon–Fri 07:00–17:30)</span>
+    <button class="btn" onclick="toggleForce()">Monitor Anyway</button>
+  </div>
+
+  <!-- TARGET CARDS -->
+  <div class="grid" id="grid"></div>
+
+  <!-- ALERT LOG -->
+  <div class="sec-hdr">
+    <span class="sec-title">Alert Log</span>
+    <button class="btn" style="font-size:.7rem;padding:3px 8px" onclick="clearLog()">Clear</button>
+  </div>
+  <div class="alert-log" id="alertLog"></div>
+
+  <!-- SETTINGS -->
+  <div class="settings">
+    <button class="settings-tog" onclick="toggleSettings()">
+      <span>⚙ Settings</span>
+      <span id="settArrow">▼</span>
+    </button>
+    <div class="settings-body" id="settBody">
+
+      <div class="sg">
+        <div class="sf">
+          <label class="sl">Check Interval (seconds)</label>
+          <input class="si" type="number" id="sInterval" min="10" max="3600" onchange="saveSetting('interval',this.value)">
+        </div>
+        <div class="sf">
+          <label class="sl">Schedule Start (Mon–Fri)</label>
+          <input class="si" type="time" id="sStart" onchange="saveSetting('start',this.value)">
+        </div>
+        <div class="sf">
+          <label class="sl">Schedule End</label>
+          <input class="si" type="time" id="sEnd" onchange="saveSetting('end',this.value)">
+        </div>
+        <div class="sf">
+          <label class="sl">History Points Per Target</label>
+          <input class="si" type="number" id="sHistory" min="10" max="300" onchange="saveSetting('history',this.value)">
+        </div>
+      </div>
+
+      <div class="sec-hdr" style="margin-top:6px">
+        <span class="sec-title">Monitored Targets</span>
+        <button class="btn" style="font-size:.7rem;padding:3px 8px" onclick="addTarget()">+ Add</button>
+      </div>
+      <div class="tbl-hdr">
+        <span>Name</span><span>URL</span><span>Warn ms</span><span>Crit ms</span><span></span>
+      </div>
+      <div id="tblRows"></div>
+
+      <div class="future-note">
+        <h4>Planned Notifications</h4>
+        Email alerts (EmailJS), Google Chat webhook, and local server push are planned for the next phase.
+        The notification architecture is already wired in — enabling them requires only config values.
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ═══════════════════════════════════════════════
+//  DEFAULT CONFIG
+// ═══════════════════════════════════════════════
+const DEFAULTS = {
+  intervalMs: 60000,
+  schedule: { startHour: 7, startMin: 0, endHour: 17, endMin: 30 },
+  historyMax: 60,
+  targets: [
+    { id: 'google',      name: 'Internet (Google)',     url: 'https://www.google.com',       warnMs: 400,  critMs: 1500, timeoutMs: 8000  },
+    { id: 'cloudflare',  name: 'Internet (Cloudflare)', url: 'https://1.1.1.1',             warnMs: 200,  critMs: 800,  timeoutMs: 5000  },
+    { id: 'schoolsoft',  name: 'SchoolSoft',            url: 'https://sms.schoolsoft.se',   warnMs: 1000, critMs: 4000, timeoutMs: 12000 },
+    { id: 'microsoft',   name: 'Microsoft 365',         url: 'https://www.microsoft.com',   warnMs: 500,  critMs: 2000, timeoutMs: 8000  },
+  ]
+};
+
+// ═══════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════
+let cfg = loadConfig();
+let muted = false;
+let forced = false;
+let checkTimer = null;
+let countdownEnd = null;
+let alertLog = loadAlerts();
+
+// Per-target runtime data
+const td = {};
+cfg.targets.forEach(t => {
+  td[t.id] = loadHistory(t.id) || { status: 'unknown', latency: null, history: [], lastCheck: null, fails: 0 };
+});
+
+// ═══════════════════════════════════════════════
+//  SCHEDULE
+// ═══════════════════════════════════════════════
+function inSchedule() {
+  if (forced) return true;
+  const d = new Date(), day = d.getDay();
+  if (day === 0 || day === 6) return false;
+  const mins = d.getHours() * 60 + d.getMinutes();
+  const { startHour, startMin, endHour, endMin } = cfg.schedule;
+  return mins >= startHour * 60 + startMin && mins < endHour * 60 + endMin;
+}
+
+function nextEvent() {
+  const d = new Date(), day = d.getDay();
+  const { startHour, startMin, endHour, endMin } = cfg.schedule;
+  const mins = d.getHours() * 60 + d.getMinutes();
+  const s = startHour * 60 + startMin, e = endHour * 60 + endMin;
+  if (day === 0 || day === 6) return `Next: Monday ${p(startHour)}:${p(startMin)}`;
+  if (mins < s) return `Starts at ${p(startHour)}:${p(startMin)}`;
+  if (mins < e) return `Active until ${p(endHour)}:${p(endMin)}`;
+  return day < 5 ? `Next: tomorrow ${p(startHour)}:${p(startMin)}` : `Next: Monday ${p(startHour)}:${p(startMin)}`;
+}
+
+// ═══════════════════════════════════════════════
+//  FETCH CHECK
+// ═══════════════════════════════════════════════
+async function checkOne(t) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), t.timeoutMs);
+  const t0 = performance.now();
+  try {
+    await fetch(t.url, { method: 'HEAD', mode: 'no-cors', cache: 'no-cache', signal: ctrl.signal });
+    clearTimeout(timer);
+    const ms = Math.round(performance.now() - t0);
+    let status = 'up';
+    if (ms >= t.critMs) status = 'critical';
+    else if (ms >= t.warnMs) status = 'slow';
+    return { status, latency: ms };
+  } catch {
+    clearTimeout(timer);
+    const ms = Math.round(performance.now() - t0);
+    return { status: ctrl.signal.aborted ? 'timeout' : 'down', latency: ms };
+  }
+}
+
+async function checkAll() {
+  if (!inSchedule()) return;
+  document.querySelectorAll('.card').forEach(c => c.classList.add('checking'));
+  const results = await Promise.all(cfg.targets.map(t => checkOne(t)));
+  results.forEach((r, i) => {
+    const t = cfg.targets[i];
+    const d = td[t.id];
+    const prev = d.status;
+    d.status = r.status;
+    d.latency = r.latency;
+    d.lastCheck = Date.now();
+    d.history.push({ latency: r.latency, status: r.status, ts: Date.now() });
+    if (d.history.length > cfg.historyMax) d.history = d.history.slice(-cfg.historyMax);
+    d.fails = ['down','timeout'].includes(r.status) ? (d.fails || 0) + 1 : 0;
+    if (prev !== 'unknown' && prev !== r.status) alert_(t, prev, r.status, r.latency);
+    saveHistory(t.id, d);
+  });
+  document.querySelectorAll('.card').forEach(c => c.classList.remove('checking'));
+  renderAll();
+  schedNext();
+}
+
+function checkAllNow() {
+  clearTimeout(checkTimer);
+  countdownEnd = null;
+  checkAll();
+}
+
+function schedNext() {
+  clearTimeout(checkTimer);
+  if (!inSchedule()) return;
+  countdownEnd = Date.now() + cfg.intervalMs;
+  checkTimer = setTimeout(checkAll, cfg.intervalMs);
+}
+
+// ═══════════════════════════════════════════════
+//  NOTIFICATIONS (future-ready)
+// ═══════════════════════════════════════════════
+const NOTIFIERS = {
+  audio: {
+    enabled: true,
+    notify(a) {
+      if (muted) return;
+      if (['down','timeout'].includes(a.newStatus))    playAlarm('critical');
+      else if (a.newStatus === 'critical')             playAlarm('critical');
+      else if (a.newStatus === 'slow')                 playAlarm('warning');
+      else if (a.newStatus === 'up')                   playAlarm('recover');
+    }
+  },
+  // ── FUTURE: email via EmailJS ─────────────────
+  email: {
+    enabled: false,
+    cfg: { serviceId: '', templateId: '', publicKey: '' },
+    async notify(a) {
+      // await emailjs.send(this.cfg.serviceId, this.cfg.templateId, {
+      //   target: a.targetName, prev: a.previousStatus,
+      //   next: a.newStatus, latency: a.latency,
+      //   time: new Date(a.ts).toLocaleString()
+      // }, this.cfg.publicKey);
+    }
+  },
+  // ── FUTURE: Google Chat webhook ───────────────
+  googleChat: {
+    enabled: false,
+    webhookUrl: '',
+    async notify(a) {
+      // const e = {down:'🔴',timeout:'🔴',critical:'🟠',slow:'🟡',up:'🟢'}[a.newStatus]||'⚪';
+      // await fetch(this.webhookUrl, {
+      //   method: 'POST', headers: {'Content-Type':'application/json'},
+      //   body: JSON.stringify({ text: `${e} *${a.targetName}* → *${a.newStatus.toUpperCase()}* (${a.latency}ms)` })
+      // });
+    }
+  }
+};
+
+function alert_(target, prev, next, latency) {
+  const entry = { targetName: target.name, previousStatus: prev, newStatus: next, latency, ts: Date.now() };
+  alertLog.unshift(entry);
+  if (alertLog.length > 100) alertLog.length = 100;
+  saveAlerts();
+  Object.values(NOTIFIERS).forEach(n => { if (n.enabled) try { n.notify(entry); } catch(e) { console.warn(e); } });
+}
+
+// ═══════════════════════════════════════════════
+//  AUDIO (Web Audio API — no external files)
+// ═══════════════════════════════════════════════
+let actx = null;
+function getCtx() {
+  if (!actx || actx.state === 'closed') actx = new (window.AudioContext || window.webkitAudioContext)();
+  if (actx.state === 'suspended') actx.resume();
+  return actx;
+}
+function tone(freq, dur, type = 'sine', vol = 0.28, delay = 0) {
+  const ctx = getCtx();
+  const osc = ctx.createOscillator();
+  const g   = ctx.createGain();
+  osc.connect(g); g.connect(ctx.destination);
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, ctx.currentTime + delay);
+  g.gain.setValueAtTime(vol, ctx.currentTime + delay);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + dur);
+  osc.start(ctx.currentTime + delay);
+  osc.stop(ctx.currentTime + delay + dur + 0.05);
+}
+function playAlarm(type) {
+  if (muted) return;
+  if (type === 'critical') {
+    tone(880, .25, 'square', .38);
+    tone(880, .25, 'square', .35, .35);
+    tone(660, .4,  'square', .35, .72);
+  } else if (type === 'warning') {
+    tone(523, .35, 'sine', .25);
+    tone(523, .35, 'sine', .2, .5);
+  } else {
+    tone(523, .18, 'sine', .18);
+    tone(659, .18, 'sine', .18, .22);
+    tone(784, .28, 'sine', .18, .44);
+  }
+}
+
+function toggleMute() {
+  muted = !muted;
+  const b = document.getElementById('muteBtn');
+  b.textContent = muted ? '🔇 Sound Off' : '🔔 Sound On';
+  b.classList.toggle('on', muted);
+  if (!muted) playAlarm('recover');
+}
+
+function toggleForce() {
+  forced = !forced;
+  const b = document.getElementById('forceBtn');
+  b.style.display = 'inline-block';
+  b.textContent = forced ? '⚡ Override ON' : '⚡ Override';
+  b.classList.toggle('on', forced);
+  if (forced) checkAllNow();
+  else schedNext();
+  renderSched();
+}
+
+// ═══════════════════════════════════════════════
+//  RENDER
+// ═══════════════════════════════════════════════
+function renderAll() {
+  renderCards();
+  renderOverall();
+  renderSched();
+  renderLog();
+}
+
+function renderOverall() {
+  const statuses = cfg.targets.map(t => td[t.id]?.status || 'unknown');
+  let o = 'up';
+  if (statuses.some(s => ['down','timeout','critical'].includes(s))) o = 'down';
+  else if (statuses.some(s => s === 'slow')) o = 'slow';
+  else if (statuses.every(s => s === 'unknown')) o = 'paused';
+  if (!inSchedule()) o = 'paused';
+
+  const el  = document.getElementById('overallStatus');
+  const dot = document.getElementById('overallDot');
+  const txt = document.getElementById('overallTxt');
+  el.className = `overall ${o}`;
+  dot.className = `dot ${['up','down'].includes(o) ? 'pulse' : ''}`;
+  txt.textContent = { up:'All Systems OK', slow:'Degraded', down:'Issues Detected', paused:'Paused' }[o];
+  document.title = ['slow','down'].includes(o) ? '⚠ ALERT – Network Monitor' : 'Network Monitor';
+}
+
+function renderSched() {
+  const bar   = document.getElementById('schedBar');
+  const sEl   = document.getElementById('schedStatus');
+  const clk   = document.getElementById('clockTxt');
+  const nxt   = document.getElementById('nextEvt');
+  const ban   = document.getElementById('pauseBanner');
+  const fBtn  = document.getElementById('forceBtn');
+  const days  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const now   = new Date();
+  clk.textContent = `${days[now.getDay()]} ${now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`;
+  nxt.textContent = nextEvent();
+  if (inSchedule()) {
+    bar.className = 'sched-bar';
+    sEl.textContent = `✓ Monitoring active — Mon–Fri ${p(cfg.schedule.startHour)}:${p(cfg.schedule.startMin)}–${p(cfg.schedule.endHour)}:${p(cfg.schedule.endMin)}`;
+    ban.className = 'pause-banner hidden';
+    if (!forced) fBtn.style.display = 'none';
+  } else {
+    bar.className = 'sched-bar off';
+    sEl.textContent = forced ? '⚡ Monitoring forced active' : '⏸ Outside school hours';
+    ban.className = forced ? 'pause-banner hidden' : 'pause-banner';
+    fBtn.style.display = 'inline-block';
+  }
+}
+
+function renderCards() {
+  const grid = document.getElementById('grid');
+  cfg.targets.forEach(t => {
+    const d = td[t.id] || { status:'unknown', latency:null, history:[], lastCheck:null, fails:0 };
+    let card = document.getElementById(`c-${t.id}`);
+    if (!card) { card = document.createElement('div'); card.className='card'; card.id=`c-${t.id}`; grid.appendChild(card); }
+    card.className = `card ${d.status}`;
+    const lv = d.latency !== null ? d.latency : '—';
+    const lu = d.latency !== null ? 'ms' : '';
+    const stats = calcStats(d.history);
+    const up    = calcUptime(d.history);
+    const trend = calcTrend(d.history);
+    const ago   = d.lastCheck ? timeAgo(d.lastCheck) : 'Never';
+    card.innerHTML = `
+      <div class="card-head">
+        <div>
+          <div class="card-name">${esc(t.name)}</div>
+          <div class="card-url">${esc(t.url)}</div>
+        </div>
+        <span class="badge ${d.status}">${d.status.toUpperCase()}</span>
+      </div>
+      <div class="lat-row">
+        <span class="lat-val ${d.status}">${lv}</span>
+        <span class="lat-unit">${lu}</span>
+        <span class="lat-trend">${trend}</span>
+      </div>
+      <div class="stats-row">
+        <div class="stat"><span class="stat-lbl">Min</span><span class="stat-val">${stats.min!=null?stats.min+'ms':'—'}</span></div>
+        <div class="stat"><span class="stat-lbl">Avg</span><span class="stat-val">${stats.avg!=null?stats.avg+'ms':'—'}</span></div>
+        <div class="stat"><span class="stat-lbl">Max</span><span class="stat-val">${stats.max!=null?stats.max+'ms':'—'}</span></div>
+        <div class="stat"><span class="stat-lbl">Uptime</span><span class="stat-val">${up!=null?up+'%':'—'}</span></div>
+        <div class="stat"><span class="stat-lbl">Checks</span><span class="stat-val">${d.history.length}</span></div>
+      </div>
+      <div class="spark">${sparkline(d.history, t)}</div>
+      <div class="card-foot">
+        <span>Last: ${ago}</span>
+        ${d.fails > 1 ? `<span class="cfails">${d.fails} consecutive fails</span>` : ''}
+      </div>`;
+  });
+  // Remove cards for deleted targets
+  const ids = new Set(cfg.targets.map(t => `c-${t.id}`));
+  grid.querySelectorAll('.card').forEach(c => { if (!ids.has(c.id)) c.remove(); });
+}
+
+function sparkline(history, t) {
+  if (history.length < 2) return `<svg viewBox="0 0 260 38"><text x="50%" y="55%" text-anchor="middle" fill="#4a5568" font-size="11">No data yet</text></svg>`;
+  const W=260, H=38, P=2;
+  const pts = history.slice(-60);
+  const lats = pts.map(p => ['down','timeout'].includes(p.status) ? t.timeoutMs : p.latency);
+  const maxL = Math.max(...lats, t.critMs, 1);
+  const bw = Math.max(1, (W - P*2) / pts.length - 0.5);
+  const bars = pts.map((pt, i) => {
+    const l = ['down','timeout'].includes(pt.status) ? t.timeoutMs : pt.latency;
+    const h = Math.max(2, (l/maxL)*(H-P*2));
+    const x = P + i*((W-P*2)/pts.length);
+    const y = H - P - h;
+    const c = ['down','timeout'].includes(pt.status) ? '#dc2626' : pt.status==='critical' ? '#ef4444' : pt.status==='slow' ? '#f59e0b' : '#22c55e';
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" fill="${c}" rx="1"/>`;
+  }).join('');
+  const wY = (H - P - (t.warnMs/maxL)*(H-P*2)).toFixed(1);
+  const cY = (H - P - (t.critMs/maxL)*(H-P*2)).toFixed(1);
+  return `<svg viewBox="0 0 ${W} ${H}">
+    <line x1="${P}" y1="${wY}" x2="${W-P}" y2="${wY}" stroke="#f59e0b" stroke-width=".6" stroke-dasharray="3,2" opacity=".35"/>
+    <line x1="${P}" y1="${cY}" x2="${W-P}" y2="${cY}" stroke="#ef4444" stroke-width=".6" stroke-dasharray="3,2" opacity=".35"/>
+    ${bars}</svg>`;
+}
+
+function renderLog() {
+  const el = document.getElementById('alertLog');
+  if (!alertLog.length) { el.innerHTML = ''; return; }
+  el.innerHTML = alertLog.slice(0,50).map(a => {
+    const c = {down:'#dc2626',timeout:'#dc2626',critical:'#ef4444',slow:'#f59e0b',up:'#22c55e'}[a.newStatus]||'#6b7280';
+    const arr = ['down','timeout','critical','slow'].includes(a.newStatus) ? '↓' : '↑';
+    const time = new Date(a.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    return `<div class="a-entry">
+      <span class="a-time">${time}</span>
+      <div class="a-dot" style="background:${c}"></div>
+      <span class="a-txt"><strong>${esc(a.targetName)}</strong> ${arr} ${a.newStatus.toUpperCase()}${a.latency?` (${a.latency}ms)`:''} <span class="a-was">(was ${a.previousStatus})</span></span>
+    </div>`;
+  }).join('');
+}
+
+function clearLog() { alertLog=[]; saveAlerts(); renderLog(); }
+
+// ═══════════════════════════════════════════════
+//  SETTINGS UI
+// ═══════════════════════════════════════════════
+function toggleSettings() {
+  const b = document.getElementById('settBody');
+  const a = document.getElementById('settArrow');
+  const open = b.classList.toggle('open');
+  a.textContent = open ? '▲' : '▼';
+  if (open) renderSettings();
+}
+
+function renderSettings() {
+  document.getElementById('sInterval').value = cfg.intervalMs / 1000;
+  document.getElementById('sStart').value    = `${p(cfg.schedule.startHour)}:${p(cfg.schedule.startMin)}`;
+  document.getElementById('sEnd').value      = `${p(cfg.schedule.endHour)}:${p(cfg.schedule.endMin)}`;
+  document.getElementById('sHistory').value  = cfg.historyMax;
+  document.getElementById('tblRows').innerHTML = cfg.targets.map((t,i) => `
+    <div class="tbl-row">
+      <input class="si" value="${esc(t.name)}"    onchange="updTarget(${i},'name',this.value)">
+      <input class="si" value="${esc(t.url)}"     onchange="updTarget(${i},'url',this.value)" placeholder="https://…">
+      <input class="si" type="number" value="${t.warnMs}"   onchange="updTarget(${i},'warnMs',+this.value)" min="50">
+      <input class="si" type="number" value="${t.critMs}"   onchange="updTarget(${i},'critMs',+this.value)"  min="100">
+      <button class="rm-btn" onclick="removeTarget(${i})" title="Remove">✕</button>
+    </div>`).join('');
+}
+
+function saveSetting(k, v) {
+  if (k === 'interval') cfg.intervalMs = +v * 1000;
+  if (k === 'start') { const [h,m]=v.split(':').map(Number); cfg.schedule.startHour=h; cfg.schedule.startMin=m; }
+  if (k === 'end')   { const [h,m]=v.split(':').map(Number); cfg.schedule.endHour=h;   cfg.schedule.endMin=m; }
+  if (k === 'history') cfg.historyMax = +v;
+  saveConfig(); schedNext();
+}
+
+function updTarget(i, f, v) {
+  cfg.targets[i][f] = v; saveConfig(); renderAll();
+}
+
+function removeTarget(i) {
+  const id = cfg.targets[i].id;
+  cfg.targets.splice(i, 1);
+  delete td[id];
+  localStorage.removeItem(`nm_h_${id}`);
+  saveConfig(); renderAll(); renderSettings();
+}
+
+function addTarget() {
+  const id = 'custom_' + Date.now();
+  cfg.targets.push({ id, name: 'New Target', url: 'https://', warnMs: 500, critMs: 2000, timeoutMs: 10000 });
+  td[id] = { status:'unknown', latency:null, history:[], lastCheck:null, fails:0 };
+  saveConfig(); renderAll(); renderSettings();
+}
+
+// ═══════════════════════════════════════════════
+//  CALCULATIONS
+// ═══════════════════════════════════════════════
+function calcStats(h) {
+  const v = h.filter(x => !['down','timeout'].includes(x.status) && x.latency!=null).map(x=>x.latency);
+  if (!v.length) return { min:null, avg:null, max:null };
+  return { min:Math.min(...v), avg:Math.round(v.reduce((a,b)=>a+b,0)/v.length), max:Math.max(...v) };
+}
+function calcUptime(h) {
+  if (!h.length) return null;
+  return Math.round(h.filter(x=>!['down','timeout'].includes(x.status)).length/h.length*100);
+}
+function calcTrend(h) {
+  const r = h.slice(-5).filter(x=>!['down','timeout'].includes(x.status)).map(x=>x.latency);
+  const o = h.slice(-10,-5).filter(x=>!['down','timeout'].includes(x.status)).map(x=>x.latency);
+  if (r.length<2||o.length<2) return '<span style="color:var(--txt3)">—</span>';
+  const ra=r.reduce((a,b)=>a+b,0)/r.length, oa=o.reduce((a,b)=>a+b,0)/o.length, d=ra-oa;
+  if (d>60)  return `<span style="color:var(--slow)" title="Latency rising">↑ +${Math.round(d)}ms</span>`;
+  if (d<-60) return `<span style="color:var(--up)"   title="Latency improving">↓ ${Math.round(d)}ms</span>`;
+  return '<span style="color:var(--txt3)">→ stable</span>';
+}
+
+// ═══════════════════════════════════════════════
+//  PERSISTENCE
+// ═══════════════════════════════════════════════
+function saveConfig() { localStorage.setItem('nm_cfg', JSON.stringify(cfg)); }
+function loadConfig() {
+  try { const s=localStorage.getItem('nm_cfg'); if(s) return {...DEFAULTS,...JSON.parse(s)}; } catch{}
+  return JSON.parse(JSON.stringify(DEFAULTS));
+}
+function saveHistory(id,d) { localStorage.setItem(`nm_h_${id}`, JSON.stringify(d)); }
+function loadHistory(id)   { try{const s=localStorage.getItem(`nm_h_${id}`);return s?JSON.parse(s):null;}catch{return null;} }
+function saveAlerts()      { localStorage.setItem('nm_al', JSON.stringify(alertLog)); }
+function loadAlerts()      { try{return JSON.parse(localStorage.getItem('nm_al')||'[]');}catch{return[];} }
+
+// ═══════════════════════════════════════════════
+//  UTILS
+// ═══════════════════════════════════════════════
+function p(n)    { return String(n).padStart(2,'0'); }
+function esc(s)  { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function timeAgo(ts) {
+  const s=Math.round((Date.now()-ts)/1000);
+  if(s<60) return `${s}s ago`; if(s<3600) return `${Math.floor(s/60)}m ago`; return `${Math.floor(s/3600)}h ago`;
+}
+
+// ═══════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════
+renderAll();
+setInterval(() => { renderSched(); renderOverall(); }, 1000);
+setInterval(() => {
+  if (!countdownEnd) return;
+  const rem = Math.max(0, Math.round((countdownEnd - Date.now()) / 1000));
+  const el = document.getElementById('timerTxt');
+  if (el) el.textContent = rem > 0 ? `Next check in ${rem}s` : '';
+}, 1000);
+
+if (inSchedule()) {
+  checkAll();
+} else {
+  document.getElementById('pauseBanner').className = 'pause-banner';
+  document.getElementById('forceBtn').style.display = 'inline-block';
+}
+</script>
+</body>
+</html>
