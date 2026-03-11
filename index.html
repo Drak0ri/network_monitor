@@ -533,25 +533,97 @@ function alert_(target, prev, next, latency) {
   if (alertLog.length > 100) alertLog.length = 100;
   saveAlerts();
   Object.values(NOTIFIERS).forEach(n => { if (n.enabled) try { n.notify(entry); } catch(e) { console.warn(e); } });
-  if (muted && ['slow','down','critical','timeout'].includes(next)) startTabFlash();
+  if (muted && ['slow','down','critical','timeout'].includes(next)) startTabFlash(next);
 }
 
 // ═══════════════════════════════════════════════
 //  AUDIO (Web Audio API — no external files)
 // ═══════════════════════════════════════════════
 let tabFlashInterval = null;
-function startTabFlash() {
-  if (tabFlashInterval) return;
+let flashSeverity = null;
+const _faviconCache = {};
+
+function makeFaviconDataUrl(type) {
+  const c = document.createElement('canvas');
+  c.width = 32; c.height = 32;
+  const x = c.getContext('2d');
+  if (type === 'critical') {
+    // Red circle
+    x.fillStyle = '#e74c3c';
+    x.beginPath(); x.arc(16, 16, 15, 0, Math.PI * 2); x.fill();
+    // White exclamation bar + dot
+    x.fillStyle = '#fff';
+    x.beginPath(); x.roundRect(13, 5, 6, 14, 3); x.fill();
+    x.beginPath(); x.arc(16, 25, 3.5, 0, Math.PI * 2); x.fill();
+  } else if (type === 'warning') {
+    // Yellow triangle
+    x.fillStyle = '#f39c12';
+    x.beginPath(); x.moveTo(16, 2); x.lineTo(31, 29); x.lineTo(1, 29); x.closePath(); x.fill();
+    // Dark exclamation bar + dot
+    x.fillStyle = '#1a1a1a';
+    x.beginPath(); x.roundRect(13.5, 9, 5, 11, 2); x.fill();
+    x.beginPath(); x.arc(16, 25, 2.8, 0, Math.PI * 2); x.fill();
+  } else if (type === 'ok') {
+    // Green circle with checkmark
+    x.fillStyle = '#27ae60';
+    x.beginPath(); x.arc(16, 16, 15, 0, Math.PI * 2); x.fill();
+    x.strokeStyle = '#fff'; x.lineWidth = 3.5; x.lineCap = 'round'; x.lineJoin = 'round';
+    x.beginPath(); x.moveTo(8, 16); x.lineTo(13, 22); x.lineTo(24, 10); x.stroke();
+  } else {
+    // Default: dark circle with "N"
+    x.fillStyle = '#2c3e50';
+    x.beginPath(); x.arc(16, 16, 15, 0, Math.PI * 2); x.fill();
+    x.fillStyle = '#ecf0f1';
+    x.font = 'bold 18px sans-serif';
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText('N', 16, 17);
+  }
+  return c.toDataURL();
+}
+
+function getFavicon(type) {
+  if (!_faviconCache[type]) _faviconCache[type] = makeFaviconDataUrl(type);
+  return _faviconCache[type];
+}
+
+function setFavicon(dataUrl) {
+  let link = document.getElementById('nm-favicon');
+  if (!link) {
+    link = document.createElement('link');
+    link.id = 'nm-favicon';
+    link.rel = 'icon';
+    link.type = 'image/png';
+    document.head.appendChild(link);
+  }
+  link.href = dataUrl;
+}
+
+function startTabFlash(severity) {
+  const iconType = ['down', 'critical', 'timeout'].includes(severity) ? 'critical' : 'warning';
+  // Upgrade severity if already flashing at a lower level
+  if (tabFlashInterval) {
+    if (flashSeverity === 'critical') return;
+    if (iconType === flashSeverity) return;
+    clearInterval(tabFlashInterval);
+    tabFlashInterval = null;
+  }
+  flashSeverity = iconType;
   let flashOn = true;
+  const alertIcon = getFavicon(iconType);
+  const dimIcon   = getFavicon('default');
   tabFlashInterval = setInterval(() => {
     document.title = flashOn ? '⚠ ALERT – Network Monitor' : 'Network Monitor';
+    setFavicon(flashOn ? alertIcon : dimIcon);
     flashOn = !flashOn;
   }, 800);
 }
+
 function stopTabFlash() {
   if (!tabFlashInterval) return;
   clearInterval(tabFlashInterval);
   tabFlashInterval = null;
+  flashSeverity = null;
+  setFavicon(getFavicon('default'));
 }
 
 let actx = null;
@@ -655,10 +727,14 @@ function renderOverall() {
   dot.className = `dot ${['up','down'].includes(o) ? 'pulse' : ''}`;
   txt.textContent = { up:'All Systems OK', slow:'Degraded', down:'Issues Detected', paused:'Paused' }[o];
   if (['slow','down'].includes(o)) {
-    if (!tabFlashInterval) document.title = '⚠ ALERT – Network Monitor';
+    if (!tabFlashInterval) {
+      document.title = '⚠ ALERT – Network Monitor';
+      setFavicon(getFavicon(o === 'down' ? 'critical' : 'warning'));
+    }
   } else {
     stopTabFlash();
     document.title = 'Network Monitor';
+    setFavicon(getFavicon(o === 'up' ? 'ok' : 'default'));
   }
 }
 
