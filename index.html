@@ -541,6 +541,7 @@ function alert_(target, prev, next, latency) {
 // ═══════════════════════════════════════════════
 let tabFlashInterval = null;
 let flashSeverity = null;
+let testFlashUntil = 0;   // timestamp — protects test flash from renderOverall
 const _faviconCache = {};
 
 function makeFaviconDataUrl(type) {
@@ -657,11 +658,16 @@ function testAlarm(type) {
   if (alertLog.length > 100) alertLog.length = 100;
   saveAlerts();
   renderLog();
-  // Update favicon / tab flash
+  // Scroll the alert log into view so the user can see the new entry
+  const logEl = document.getElementById('alertLog');
+  if (logEl) logEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  // Update favicon / tab flash — protect from the 1-second renderOverall ticker
   if (type === 'recover') {
+    testFlashUntil = 0;
     stopTabFlash();
     setFavicon(getFavicon('ok'));
   } else {
+    testFlashUntil = Date.now() + 6000; // hold test flash for 6 s
     startTabFlash(newStatus);
   }
 }
@@ -748,12 +754,13 @@ function renderOverall() {
   el.className = `overall ${o}`;
   dot.className = `dot ${['up','down'].includes(o) ? 'pulse' : ''}`;
   txt.textContent = { up:'All Systems OK', slow:'Degraded', down:'Issues Detected', paused:'Paused' }[o];
+  const inTestFlash = Date.now() < testFlashUntil;
   if (['slow','down'].includes(o)) {
     if (!tabFlashInterval) {
       document.title = '⚠ ALERT – Network Monitor';
       setFavicon(getFavicon(o === 'down' ? 'critical' : 'warning'));
     }
-  } else {
+  } else if (!inTestFlash) {
     stopTabFlash();
     document.title = 'Network Monitor';
     setFavicon(getFavicon(o === 'up' ? 'ok' : 'default'));
@@ -997,7 +1004,10 @@ function timeAgo(ts) {
 //  INIT
 // ═══════════════════════════════════════════════
 renderAll();
-setInterval(() => { renderSched(); renderOverall(); }, 1000);
+setInterval(() => {
+  if (testFlashUntil && Date.now() >= testFlashUntil) { testFlashUntil = 0; stopTabFlash(); }
+  renderSched(); renderOverall();
+}, 1000);
 setInterval(() => {
   if (!countdownEnd) return;
   const rem = Math.max(0, Math.round((countdownEnd - Date.now()) / 1000));
