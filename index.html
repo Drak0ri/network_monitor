@@ -319,6 +319,39 @@
       <div id="tblRows"></div>
       <p style="font-size:.68rem;color:var(--txt3);margin-top:8px">The note field appears on the monitoring card as a reminder of what each target measures.</p>
 
+      <!-- SOUND SETTINGS -->
+      <div class="sec-hdr" style="margin-top:16px">
+        <span class="sec-title">Alarm Sound</span>
+      </div>
+
+      <div class="sg">
+        <div class="sf">
+          <label class="sl">Test Alarms</label>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn" style="background:var(--crit)" onclick="playAlarm('critical')">🔴 Critical</button>
+            <button class="btn" style="background:#7a5a00" onclick="playAlarm('warning')">🟡 Warning</button>
+            <button class="btn" style="background:var(--up)" onclick="playAlarm('recover')">🟢 Recover</button>
+          </div>
+        </div>
+        <div class="sf">
+          <label class="sl">Custom Sound URL <span style="font-weight:400;color:var(--txt3)">(mp3 / ogg / wav)</span></label>
+          <input class="si" type="url" id="sSoundUrl" placeholder="https://example.com/alert.mp3" oninput="saveSetting('soundUrl',this.value)" style="width:100%">
+        </div>
+        <div class="sf">
+          <label class="sl">…or pick a local file</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <label class="btn" style="cursor:pointer;margin:0">
+              📂 Choose file
+              <input type="file" id="sSoundFile" accept="audio/*" onchange="loadLocalSound(this)" style="display:none">
+            </label>
+            <span id="sSoundFileLabel" style="font-size:.78rem;color:var(--txt2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+          </div>
+        </div>
+        <p style="font-size:.68rem;color:var(--txt3);margin:2px 0 0">
+          When a custom sound is set it plays for all alarm types. Clear both fields to revert to the built-in tones. Local file is forgotten on page reload.
+        </p>
+      </div>
+
       <div class="future-note">
         <h4>Planned Notifications</h4>
         Email alerts (EmailJS), Google Chat webhook, and local server push are planned for the next phase.
@@ -337,6 +370,7 @@ const DEFAULTS = {
   intervalMs: 60000,
   schedule: { startHour: 7, startMin: 0, endHour: 17, endMin: 30 },
   historyMax: 60,
+  soundUrl: '',
   targets: [
     { id: 'google',     name: 'Internet (Google)',     url: 'https://www.google.com',                          warnMs: 400,  critMs: 1500, timeoutMs: 8000,  note: '' },
     { id: 'cloudflare', name: 'Internet (Cloudflare)', url: 'https://1.1.1.1',                                warnMs: 200,  critMs: 800,  timeoutMs: 5000,  note: '' },
@@ -350,6 +384,7 @@ const DEFAULTS = {
 let cfg = loadConfig();
 let muted = false;
 let forced = false;
+let localSoundUrl = null; // blob URL from a locally-picked audio file
 let checkTimer = null;
 let countdownEnd = null;
 let alertLog = loadAlerts();
@@ -511,6 +546,13 @@ function tone(freq, dur, type = 'sine', vol = 0.28, delay = 0) {
 }
 function playAlarm(type) {
   if (muted) return;
+  const customUrl = localSoundUrl || cfg.soundUrl;
+  if (customUrl) {
+    const audio = new Audio(customUrl);
+    audio.volume = 0.8;
+    audio.play().catch(err => console.warn('Custom alarm sound failed:', err));
+    return;
+  }
   if (type === 'critical') {
     tone(880, .25, 'square', .38);
     tone(880, .25, 'square', .35, .35);
@@ -522,6 +564,22 @@ function playAlarm(type) {
     tone(523, .18, 'sine', .18);
     tone(659, .18, 'sine', .18, .22);
     tone(784, .28, 'sine', .18, .44);
+  }
+}
+
+function loadLocalSound(input) {
+  if (localSoundUrl) URL.revokeObjectURL(localSoundUrl);
+  localSoundUrl = null;
+  if (input.files && input.files[0]) {
+    localSoundUrl = URL.createObjectURL(input.files[0]);
+    // Clear URL field — local file takes precedence
+    const urlField = document.getElementById('sSoundUrl');
+    if (urlField) { urlField.value = ''; cfg.soundUrl = ''; saveConfig(); }
+    const label = document.getElementById('sSoundFileLabel');
+    if (label) label.textContent = input.files[0].name;
+  } else {
+    const label = document.getElementById('sSoundFileLabel');
+    if (label) label.textContent = '';
   }
 }
 
@@ -698,6 +756,7 @@ function renderSettings() {
   document.getElementById('sStart').value    = `${p(cfg.schedule.startHour)}:${p(cfg.schedule.startMin)}`;
   document.getElementById('sEnd').value      = `${p(cfg.schedule.endHour)}:${p(cfg.schedule.endMin)}`;
   document.getElementById('sHistory').value  = cfg.historyMax;
+  document.getElementById('sSoundUrl').value = cfg.soundUrl || '';
   document.getElementById('tblRows').innerHTML = cfg.targets.map((t,i) => `
     <div class="tbl-row">
       <input class="si" value="${esc(t.name)}"  onchange="updTarget(${i},'name',this.value)">
@@ -716,6 +775,14 @@ function saveSetting(k, v) {
   if (k === 'start') { const [h,m]=v.split(':').map(Number); cfg.schedule.startHour=h; cfg.schedule.startMin=m; }
   if (k === 'end')   { const [h,m]=v.split(':').map(Number); cfg.schedule.endHour=h;   cfg.schedule.endMin=m; }
   if (k === 'history') cfg.historyMax = +v;
+  if (k === 'soundUrl') {
+    cfg.soundUrl = v.trim();
+    if (localSoundUrl) { URL.revokeObjectURL(localSoundUrl); localSoundUrl = null; }
+    const fi = document.getElementById('sSoundFile');
+    if (fi) fi.value = '';
+    const label = document.getElementById('sSoundFileLabel');
+    if (label) label.textContent = '';
+  }
   saveConfig(); schedNext();
 }
 
