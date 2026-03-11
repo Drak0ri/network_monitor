@@ -336,9 +336,9 @@
         <div class="sf">
           <label class="sl">Test Alarms</label>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <button class="btn" style="background:var(--crit)" onclick="playAlarm('critical')">🔴 Critical</button>
-            <button class="btn" style="background:#7a5a00" onclick="playAlarm('warning')">🟡 Warning</button>
-            <button class="btn" style="background:var(--up)" onclick="playAlarm('recover')">🟢 Recover</button>
+            <button class="btn" style="background:var(--crit)" onclick="testAlarm('critical')">🔴 Critical</button>
+            <button class="btn" style="background:#7a5a00" onclick="testAlarm('warning')">🟡 Warning</button>
+            <button class="btn" style="background:var(--up)" onclick="testAlarm('recover')">🟢 Recover</button>
           </div>
         </div>
         <div class="sf">
@@ -644,6 +644,28 @@ function tone(freq, dur, type = 'sine', vol = 0.28, delay = 0) {
   osc.start(ctx.currentTime + delay);
   osc.stop(ctx.currentTime + delay + dur + 0.05);
 }
+function testAlarm(type) {
+  // Play sound (respects mute)
+  playAlarm(type);
+  // Inject a test entry into the alert log
+  const statusMap = { critical: 'critical', warning: 'slow', recover: 'up' };
+  const prevMap   = { critical: 'up',       warning: 'up',   recover: 'critical' };
+  const newStatus = statusMap[type] || type;
+  const prevStatus = prevMap[type] || 'unknown';
+  const entry = { targetName: 'Test Alarm', previousStatus: prevStatus, newStatus, latency: null, ts: Date.now() };
+  alertLog.unshift(entry);
+  if (alertLog.length > 100) alertLog.length = 100;
+  saveAlerts();
+  renderLog();
+  // Update favicon / tab flash
+  if (type === 'recover') {
+    stopTabFlash();
+    setFavicon(getFavicon('ok'));
+  } else {
+    startTabFlash(newStatus);
+  }
+}
+
 function playAlarm(type) {
   if (muted) return;
   const customUrl = localSoundUrl || cfg.soundUrl;
