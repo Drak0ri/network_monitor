@@ -408,7 +408,12 @@ let alertLog = loadAlerts();
 // Per-target runtime data
 const td = {};
 cfg.targets.forEach(t => {
-  td[t.id] = loadHistory(t.id) || { status: 'unknown', latency: null, history: [], lastCheck: null, fails: 0 };
+  const loaded = loadHistory(t.id);
+  td[t.id] = loaded || { status: 'unknown', latency: null, history: [], lastCheck: null, fails: 0,
+                         checkCountSinceStart: 0, countWindowStartTs: 0 };
+  // Backward-compat: seed missing counter fields in older stored data
+  if (td[t.id].checkCountSinceStart == null) td[t.id].checkCountSinceStart = 0;
+  if (td[t.id].countWindowStartTs  == null) td[t.id].countWindowStartTs  = 0;
 });
 
 // ═══════════════════════════════════════════════
@@ -473,6 +478,13 @@ async function checkAll() {
       d.lastCheck = Date.now();
       d.history.push({ latency: r.latency, status: r.status, ts: Date.now() });
       if (d.history.length > cfg.historyMax) d.history = d.history.slice(-cfg.historyMax);
+      // Daily weekday counter: reset if we've crossed a new window boundary
+      const windowStart = getWeekdayWindowStartTs(new Date());
+      if (d.countWindowStartTs !== windowStart) {
+        d.countWindowStartTs = windowStart;
+        d.checkCountSinceStart = 0;
+      }
+      d.checkCountSinceStart = (d.checkCountSinceStart || 0) + 1;
       d.fails = ['down','timeout'].includes(r.status) ? (d.fails || 0) + 1 : 0;
       if (prev !== 'unknown' && prev !== r.status) alert_(t, prev, r.status, r.latency);
       saveHistory(t.id, d);
@@ -529,6 +541,23 @@ function nextScheduleStartDate(from) {
 function msUntilNextScheduleStart() {
   const now = new Date();
   return Math.max(0, nextScheduleStartDate(now).getTime() - now.getTime());
+}
+
+// Returns the timestamp of the most recent weekday (Mon–Fri) schedule-start
+// boundary at cfg.schedule.startHour:startMin, using local time.
+// Examples (startHour=7, startMin=0):
+//   Mon 08:00 → Mon 07:00   Mon 06:00 → Fri 07:00
+//   Sat/Sun   → Fri 07:00   Wed 07:00 → Wed 07:00 (exactly on boundary)
+function getWeekdayWindowStartTs(now) {
+  now = now || new Date();
+  const { startHour, startMin } = cfg.schedule;
+  const d = new Date(now);
+  d.setHours(startHour, startMin, 0, 0);
+  // If today's boundary is still in the future, step back one calendar day
+  if (d.getTime() > now.getTime()) d.setDate(d.getDate() - 1);
+  // Skip back past weekend days to reach a weekday
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
+  return d.getTime();
 }
 // ───────────────────────────────────────────────────────────────────────────
 
@@ -890,7 +919,7 @@ function renderCards() {
         <div class="stat"><span class="stat-lbl">Avg</span><span class="stat-val">${stats.avg!=null?stats.avg+'ms':'—'}</span></div>
         <div class="stat"><span class="stat-lbl">Max</span><span class="stat-val">${stats.max!=null?stats.max+'ms':'—'}</span></div>
         <div class="stat"><span class="stat-lbl">Uptime</span><span class="stat-val">${up!=null?up+'%':'—'}</span></div>
-        <div class="stat"><span class="stat-lbl">Checks</span><span class="stat-val">${d.history.length}</span></div>
+        <div class="stat"><span class="stat-lbl">Checks (since ${p(cfg.schedule.startHour)}:${p(cfg.schedule.startMin)})</span><span class="stat-val">${d.checkCountSinceStart ?? d.history.length}</span></div>
       </div>
       <div class="spark">${sparkline(d.history, t)}</div>
       <div class="card-foot">
@@ -1005,6 +1034,8 @@ function resetChecks() {
   cfg.targets.forEach(t => {
     if (td[t.id]) {
       td[t.id].history = [];
+      td[t.id].checkCountSinceStart = 0;
+      td[t.id].countWindowStartTs = 0;
       saveHistory(t.id, td[t.id]);
     }
   });
@@ -1026,7 +1057,8 @@ function addTarget() {
   const id = 'custom_' + Date.now();
   const name = trimmedUrl.replace(/^https?:\/\//, '').replace(/\/$/, '') || 'New Target';
   cfg.targets.push({ id, name, url: trimmedUrl, warnMs: 500, critMs: 2000, timeoutMs: 10000, note: '' });
-  td[id] = { status:'unknown', latency:null, history:[], lastCheck:null, fails:0 };
+  td[id] = { status:'unknown', latency:null, history:[], lastCheck:null, fails:0,
+             checkCountSinceStart: 0, countWindowStartTs: 0 };
   saveConfig(); renderAll(); renderSettings();
 }
 
