@@ -408,7 +408,9 @@ let alertLog = loadAlerts();
 // Per-target runtime data
 const td = {};
 cfg.targets.forEach(t => {
-  td[t.id] = loadHistory(t.id) || { status: 'unknown', latency: null, history: [], lastCheck: null, fails: 0 };
+  const loaded = loadHistory(t.id) || { status: 'unknown', latency: null, history: [], lastCheck: null, fails: 0 };
+  if (loaded.checkCountTotal == null) loaded.checkCountTotal = loaded.history.length;
+  td[t.id] = loaded;
 });
 
 // ═══════════════════════════════════════════════
@@ -473,6 +475,7 @@ async function checkAll() {
       d.lastCheck = Date.now();
       d.history.push({ latency: r.latency, status: r.status, ts: Date.now() });
       if (d.history.length > cfg.historyMax) d.history = d.history.slice(-cfg.historyMax);
+      d.checkCountTotal = (d.checkCountTotal || 0) + 1;
       d.fails = ['down','timeout'].includes(r.status) ? (d.fails || 0) + 1 : 0;
       if (prev !== 'unknown' && prev !== r.status) alert_(t, prev, r.status, r.latency);
       saveHistory(t.id, d);
@@ -890,7 +893,7 @@ function renderCards() {
         <div class="stat"><span class="stat-lbl">Avg</span><span class="stat-val">${stats.avg!=null?stats.avg+'ms':'—'}</span></div>
         <div class="stat"><span class="stat-lbl">Max</span><span class="stat-val">${stats.max!=null?stats.max+'ms':'—'}</span></div>
         <div class="stat"><span class="stat-lbl">Uptime</span><span class="stat-val">${up!=null?up+'%':'—'}</span></div>
-        <div class="stat"><span class="stat-lbl">Checks</span><span class="stat-val">${d.history.length}</span></div>
+        <div class="stat"><span class="stat-lbl">Checks</span><span class="stat-val">${d.checkCountTotal !== null && d.checkCountTotal !== undefined ? d.checkCountTotal : d.history.length}</span></div>
       </div>
       <div class="spark">${sparkline(d.history, t)}</div>
       <div class="card-foot">
