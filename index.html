@@ -398,6 +398,8 @@ let forced = false;
 let localSoundUrl = null; // blob URL from a locally-picked audio file
 let checkTimer = null;
 let countdownEnd = null;
+let countdownMode = null;        // 'check' | 'resume' | null
+let countdownTargetLabel = '';   // e.g. '07:00' when mode === 'resume'
 let alertLog = loadAlerts();
 
 // Per-target runtime data
@@ -476,6 +478,7 @@ async function checkAll() {
 function checkAllNow() {
   clearTimeout(checkTimer);
   countdownEnd = null;
+  countdownMode = null;
   checkAll();
 }
 
@@ -519,6 +522,8 @@ function msUntilNextScheduleStart() {
 function schedNext() {
   clearTimeout(checkTimer);
   if (inSchedule()) {
+    countdownMode = 'check';
+    countdownTargetLabel = '';
     const jitter = cfg.randomizeInterval ? Math.round(Math.random() * cfg.randomizeMaxMs) : 0;
     const delay = cfg.intervalMs + jitter;
     countdownEnd = Date.now() + delay;
@@ -526,7 +531,10 @@ function schedNext() {
     return;
   }
   // Outside schedule: arm a wake-up at the next schedule start time
-  const delay = msUntilNextScheduleStart();
+  const nextStart = nextScheduleStartDate(new Date());
+  countdownMode = 'resume';
+  countdownTargetLabel = `${p(nextStart.getHours())}:${p(nextStart.getMinutes())}`;
+  const delay = Math.max(0, nextStart.getTime() - Date.now());
   countdownEnd = Date.now() + delay;
   checkTimer = setTimeout(checkAll, delay);
 }
@@ -1063,10 +1071,20 @@ setInterval(() => {
   renderSched(); renderOverall();
 }, 1000);
 setInterval(() => {
-  if (!countdownEnd) return;
-  const rem = Math.max(0, Math.round((countdownEnd - Date.now()) / 1000));
   const el = document.getElementById('timerTxt');
-  if (el) el.textContent = rem > 0 ? `Next check in ${rem}s` : '';
+  if (!el) return;
+  if (!countdownEnd) { el.textContent = ''; return; }
+  const remS = Math.max(0, Math.round((countdownEnd - Date.now()) / 1000));
+  if (remS <= 0) { el.textContent = ''; return; }
+  if (countdownMode === 'resume') {
+    const h = Math.floor(remS / 3600);
+    const m = Math.floor((remS % 3600) / 60);
+    const s = remS % 60;
+    const hm = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
+    el.textContent = `Resumes in ${hm} (at ${countdownTargetLabel || 'start'})`;
+  } else {
+    el.textContent = `Next check in ${remS}s`;
+  }
 }, 1000);
 
 if (inSchedule()) {
