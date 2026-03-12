@@ -400,6 +400,9 @@ let checkTimer = null;
 let countdownEnd = null;
 let countdownMode = null;        // 'check' | 'resume' | null
 let countdownTargetLabel = '';   // e.g. '07:00' when mode === 'resume'
+let checksInFlight = false;      // overlap guard — only one checkAll() runs at a time
+let lastCheckStartedAt = null;   // timestamp when last checkAll() began
+let lastCheckFinishedAt = null;  // timestamp when last checkAll() completed successfully
 let alertLog = loadAlerts();
 
 // Per-target runtime data
@@ -455,24 +458,34 @@ async function checkOne(t) {
 
 async function checkAll() {
   if (!inSchedule()) { renderAll(); schedNext(); return; }
+  if (checksInFlight) return;                              // overlap guard
+  checksInFlight = true;
+  lastCheckStartedAt = Date.now();
   document.querySelectorAll('.card').forEach(c => c.classList.add('checking'));
-  const results = await Promise.all(cfg.targets.map(t => checkOne(t)));
-  results.forEach((r, i) => {
-    const t = cfg.targets[i];
-    const d = td[t.id];
-    const prev = d.status;
-    d.status = r.status;
-    d.latency = r.latency;
-    d.lastCheck = Date.now();
-    d.history.push({ latency: r.latency, status: r.status, ts: Date.now() });
-    if (d.history.length > cfg.historyMax) d.history = d.history.slice(-cfg.historyMax);
-    d.fails = ['down','timeout'].includes(r.status) ? (d.fails || 0) + 1 : 0;
-    if (prev !== 'unknown' && prev !== r.status) alert_(t, prev, r.status, r.latency);
-    saveHistory(t.id, d);
-  });
-  document.querySelectorAll('.card').forEach(c => c.classList.remove('checking'));
-  renderAll();
-  schedNext();
+  try {
+    const results = await Promise.all(cfg.targets.map(t => checkOne(t)));
+    results.forEach((r, i) => {
+      const t = cfg.targets[i];
+      const d = td[t.id];
+      const prev = d.status;
+      d.status = r.status;
+      d.latency = r.latency;
+      d.lastCheck = Date.now();
+      d.history.push({ latency: r.latency, status: r.status, ts: Date.now() });
+      if (d.history.length > cfg.historyMax) d.history = d.history.slice(-cfg.historyMax);
+      d.fails = ['down','timeout'].includes(r.status) ? (d.fails || 0) + 1 : 0;
+      if (prev !== 'unknown' && prev !== r.status) alert_(t, prev, r.status, r.latency);
+      saveHistory(t.id, d);
+    });
+    lastCheckFinishedAt = Date.now();
+  } catch(e) {
+    console.error('[NetworkMonitor] checkAll error:', e);
+  } finally {
+    checksInFlight = false;
+    document.querySelectorAll('.card').forEach(c => c.classList.remove('checking'));
+    renderAll();
+    schedNext();
+  }
 }
 
 function checkAllNow() {
@@ -1086,6 +1099,26 @@ setInterval(() => {
     el.textContent = `Next check in ${remS}s`;
   }
 }, 1000);
+
+// ── WATCHDOG ─────────────────────────────────────────────────────────────────
+// Fires every 15 s. If we're inside schedule and no check has completed within
+// max(3×interval, 3 min) since the last activity, force a scan.  Prevents
+// silent stalls caused by sleep, background throttling, or unhandled errors.
+// Note: the checksInFlight guard above ensures we never double-trigger while a
+// check is still running.  We fall back to lastCheckStartedAt when no check has
+// ever finished (e.g., the first attempt threw), so the watchdog can retry.
+setInterval(() => {
+  if (!inSchedule() || checksInFlight) return;
+  // Use 3× the configured interval (min 3 min) so normal slow checks aren't
+  // mis-identified as stalls.
+  const threshold = Math.max(3 * cfg.intervalMs, 3 * 60 * 1000);
+  // Prefer the last finished time; fall back to last started time so a failed
+  // first check can also be retried.
+  const lastActivity = lastCheckFinishedAt !== null ? lastCheckFinishedAt : lastCheckStartedAt;
+  if (lastActivity === null) return; // init hasn't run yet; let normal startup handle it
+  if (Date.now() - lastActivity > threshold) checkAllNow();
+}, 15000);
+// ─────────────────────────────────────────────────────────────────────────────
 
 if (inSchedule()) {
   checkAll();
