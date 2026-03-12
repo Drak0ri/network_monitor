@@ -452,7 +452,7 @@ async function checkOne(t) {
 }
 
 async function checkAll() {
-  if (!inSchedule()) return;
+  if (!inSchedule()) { renderAll(); schedNext(); return; }
   document.querySelectorAll('.card').forEach(c => c.classList.add('checking'));
   const results = await Promise.all(cfg.targets.map(t => checkOne(t)));
   results.forEach((r, i) => {
@@ -479,11 +479,54 @@ function checkAllNow() {
   checkAll();
 }
 
+// ── WAKE SCHEDULING ────────────────────────────────────────────────────────
+// When outside schedule, we arm a timer to call checkAll() at the next start
+// time instead of stopping entirely.  This ensures the monitor resumes each
+// weekday morning without requiring a page reload.
+// NOTE: if the device sleeps, JS timers are frozen.  The wakeHandler below
+// catches that case: on focus / visibility-change it re-evaluates and either
+// starts scanning immediately or re-arms the next-start timer.
+function isWeekend(day) { return day === 0 || day === 6; }
+
+function nextScheduleStartDate(from) {
+  from = from || new Date();
+  const { startHour, startMin } = cfg.schedule;
+  const candidate = new Date(from);
+  candidate.setHours(startHour, startMin, 0, 0);
+  // If today is a weekend, advance to Monday
+  if (isWeekend(candidate.getDay())) {
+    // Sun(0)→+1 day, Sat(6)→+2 days to reach Monday
+    const daysToMon = candidate.getDay() === 0 ? 1 : 2;
+    candidate.setDate(candidate.getDate() + daysToMon);
+    candidate.setHours(startHour, startMin, 0, 0);
+    return candidate;
+  }
+  // If start time today hasn't arrived yet, use today
+  if (from < candidate) return candidate;
+  // Otherwise advance to next day, skipping weekends
+  candidate.setDate(candidate.getDate() + 1);
+  while (isWeekend(candidate.getDay())) candidate.setDate(candidate.getDate() + 1);
+  candidate.setHours(startHour, startMin, 0, 0);
+  return candidate;
+}
+
+function msUntilNextScheduleStart() {
+  const now = new Date();
+  return Math.max(0, nextScheduleStartDate(now).getTime() - now.getTime());
+}
+// ───────────────────────────────────────────────────────────────────────────
+
 function schedNext() {
   clearTimeout(checkTimer);
-  if (!inSchedule()) return;
-  const jitter = cfg.randomizeInterval ? Math.round(Math.random() * cfg.randomizeMaxMs) : 0;
-  const delay = cfg.intervalMs + jitter;
+  if (inSchedule()) {
+    const jitter = cfg.randomizeInterval ? Math.round(Math.random() * cfg.randomizeMaxMs) : 0;
+    const delay = cfg.intervalMs + jitter;
+    countdownEnd = Date.now() + delay;
+    checkTimer = setTimeout(checkAll, delay);
+    return;
+  }
+  // Outside schedule: arm a wake-up at the next schedule start time
+  const delay = msUntilNextScheduleStart();
   countdownEnd = Date.now() + delay;
   checkTimer = setTimeout(checkAll, delay);
 }
@@ -1031,7 +1074,22 @@ if (inSchedule()) {
 } else {
   document.getElementById('pauseBanner').className = 'pause-banner';
   document.getElementById('forceBtn').style.display = 'inline-block';
+  schedNext(); // arm wake-up timer for next schedule start
 }
+
+// ── WAKE / RESUME HANDLERS ──────────────────────────────────────────────────
+// When the device wakes or the tab becomes active again, frozen timers may
+// have been missed.  Re-evaluate schedule immediately and either run a scan
+// or re-arm the next-start timer.
+function wakeHandler() {
+  if (document.hidden) return;
+  if (inSchedule()) checkAllNow();
+  else schedNext();
+}
+window.addEventListener('focus', wakeHandler);
+document.addEventListener('visibilitychange', wakeHandler);
+window.addEventListener('pageshow', wakeHandler);
+// ───────────────────────────────────────────────────────────────────────────
 </script>
 </body>
 </html>
