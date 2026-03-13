@@ -325,7 +325,7 @@
         <div class="card-head">
           <div>
             <div class="card-name">↓ Download Speed</div>
-            <div class="card-url">speed.cloudflare.com — ~4 MB test</div>
+            <div class="card-url">File Size ~4 MB</div>
             <div class="card-note" id="dlNote"></div>
           </div>
           <span class="badge unknown" id="dlBadge">UNKNOWN</span>
@@ -338,7 +338,7 @@
           <div class="stat"><span class="stat-lbl">Min</span><span class="stat-val" id="dlStatMin">—</span></div>
           <div class="stat"><span class="stat-lbl">Avg</span><span class="stat-val" id="dlStatAvg">—</span></div>
           <div class="stat"><span class="stat-lbl">Max</span><span class="stat-val" id="dlStatMax">—</span></div>
-          <div class="stat"><span class="stat-lbl">Tests</span><span class="stat-val" id="dlStatCount">—</span></div>
+          <div class="stat"><span class="stat-lbl" id="dlStatCountLbl">Tests</span><span class="stat-val" id="dlStatCount">—</span></div>
         </div>
         <div class="spark" id="dlSpark"></div>
         <div class="card-foot">
@@ -352,7 +352,7 @@
         <div class="card-head">
           <div>
             <div class="card-name">↑ Upload Speed</div>
-            <div class="card-url">speed.cloudflare.com — ~2 MB test</div>
+            <div class="card-url">File Size ~2 MB</div>
             <div class="card-note" id="ulNote"></div>
           </div>
           <span class="badge unknown" id="ulBadge">UNKNOWN</span>
@@ -365,7 +365,7 @@
           <div class="stat"><span class="stat-lbl">Min</span><span class="stat-val" id="ulStatMin">—</span></div>
           <div class="stat"><span class="stat-lbl">Avg</span><span class="stat-val" id="ulStatAvg">—</span></div>
           <div class="stat"><span class="stat-lbl">Max</span><span class="stat-val" id="ulStatMax">—</span></div>
-          <div class="stat"><span class="stat-lbl">Tests</span><span class="stat-val" id="ulStatCount">—</span></div>
+          <div class="stat"><span class="stat-lbl" id="ulStatCountLbl">Tests</span><span class="stat-val" id="ulStatCount">—</span></div>
         </div>
         <div class="spark" id="ulSpark"></div>
         <div class="card-foot">
@@ -598,6 +598,12 @@ let uploadResult       = null;  // { speedMbps, bytes, durationMs, status, ts }
 let uploadHistory      = loadUploadHistory();
 let uploadPrevStatus   = uploadHistory.length ? uploadHistory[uploadHistory.length-1].status : 'unknown';
 let uploadTestInFlight = false;
+const _sc = loadSpeedCounter();
+let speedCountSinceStart    = _sc.count;
+let speedCountWindowStartTs = _sc.windowTs;
+const _uc = loadUploadCounter();
+let uploadCountSinceStart    = _uc.count;
+let uploadCountWindowStartTs = _uc.windowTs;
 let pingResult         = null;  // { ms, status, ts }
 let pingHistory        = loadPingHistory();
 let pingPrevStatus     = pingHistory.length ? pingHistory[pingHistory.length-1].status : 'unknown';
@@ -1157,6 +1163,10 @@ function _recordUploadResult(status, speedMbps) {
   uploadHistory.push({ speedMbps, status, ts: Date.now() });
   if (uploadHistory.length > cfg.historyMax) uploadHistory = uploadHistory.slice(-cfg.historyMax);
   saveUploadHistory();
+  const wStart = getWeekdayWindowStartTs(new Date());
+  if (uploadCountWindowStartTs !== wStart) { uploadCountWindowStartTs = wStart; uploadCountSinceStart = 0; }
+  uploadCountSinceStart++;
+  saveUploadCounter();
   uploadPrevStatus = status;
   if (prev !== 'unknown' && prev !== status) {
     alert_({ name: 'Upload Speed', id: '_upload' }, prev, status, null);
@@ -1203,6 +1213,10 @@ function _recordSpeedResult(status, speedMbps) {
   speedHistory.push({ speedMbps, status, ts: Date.now() });
   if (speedHistory.length > cfg.historyMax) speedHistory = speedHistory.slice(-cfg.historyMax);
   saveSpeedHistory();
+  const wStart = getWeekdayWindowStartTs(new Date());
+  if (speedCountWindowStartTs !== wStart) { speedCountWindowStartTs = wStart; speedCountSinceStart = 0; }
+  speedCountSinceStart++;
+  saveSpeedCounter();
   speedPrevStatus = status;
   if (prev !== 'unknown' && prev !== status) {
     alert_({ name: 'Download Speed', id: '_speed' }, prev, status, null);
@@ -1228,16 +1242,20 @@ function renderSpeedCard() {
   _renderOneSpeedCard({
     cardId: 'dlCard', valId: 'dlVal', badgeId: 'dlBadge', noteId: 'dlNote',
     minId: 'dlStatMin', avgId: 'dlStatAvg', maxId: 'dlStatMax', cntId: 'dlStatCount',
+    cntLblId: 'dlStatCountLbl',
     sparkId: 'dlSpark', footLId: 'dlFootLeft', footRId: 'dlFootRight',
     result: speedResult, history: speedHistory,
-    warnVal: dlWarn, critVal: dlCrit, enabled: speedEnabled
+    warnVal: dlWarn, critVal: dlCrit, enabled: speedEnabled,
+    countSinceStart: speedCountSinceStart
   });
   _renderOneSpeedCard({
     cardId: 'ulCard', valId: 'ulVal', badgeId: 'ulBadge', noteId: 'ulNote',
     minId: 'ulStatMin', avgId: 'ulStatAvg', maxId: 'ulStatMax', cntId: 'ulStatCount',
+    cntLblId: 'ulStatCountLbl',
     sparkId: 'ulSpark', footLId: 'ulFootLeft', footRId: 'ulFootRight',
     result: uploadResult, history: uploadHistory,
-    warnVal: ulWarn, critVal: ulCrit, enabled: speedEnabled
+    warnVal: ulWarn, critVal: ulCrit, enabled: speedEnabled,
+    countSinceStart: uploadCountSinceStart
   });
   _renderOneSpeedCard({
     cardId: 'pingCard', valId: 'pingVal', badgeId: 'pingBadge', noteId: 'pingNote',
@@ -1254,11 +1272,11 @@ function renderSpeedCard() {
 }
 
 function _renderOneSpeedCard({ cardId, valId, badgeId, noteId,
-    minId, avgId, maxId, cntId, sparkId, footLId, footRId,
+    minId, avgId, maxId, cntId, cntLblId, sparkId, footLId, footRId,
     result, history, warnVal, critVal, enabled,
     valueKey = 'speedMbps', unit = 'Mbps', valFmt = v => v.toFixed(2),
     statFmt = v => v.toFixed(1) + ' ' + unit, noteText = null,
-    higherIsBetter = true }) {
+    higherIsBetter = true, countSinceStart = null }) {
   const card  = document.getElementById(cardId);  if (!card) return;
   const valEl = document.getElementById(valId);
   const badge = document.getElementById(badgeId);
@@ -1298,7 +1316,11 @@ function _renderOneSpeedCard({ cardId, valId, badgeId, noteId,
   } else {
     [minEl, avgEl, maxEl].forEach(el => { if (el) el.textContent = '—'; });
   }
-  if (cntEl) cntEl.textContent = history.length;
+  if (cntEl) cntEl.textContent = countSinceStart != null ? countSinceStart : history.length;
+  const cntLblEl = g(cntLblId);
+  if (cntLblEl) cntLblEl.textContent = countSinceStart != null
+    ? `Checks (since ${p(cfg.schedule.startHour)}:${p(cfg.schedule.startMin)})`
+    : 'Tests';
 
   // Sparkline
   const sp = g(sparkId);
@@ -1624,11 +1646,17 @@ function resetChecks() {
   speedHistory = [];
   speedResult = null;
   speedPrevStatus = 'unknown';
+  speedCountSinceStart = 0;
+  speedCountWindowStartTs = 0;
   saveSpeedHistory();
+  saveSpeedCounter();
   uploadHistory = [];
   uploadResult = null;
   uploadPrevStatus = 'unknown';
+  uploadCountSinceStart = 0;
+  uploadCountWindowStartTs = 0;
   saveUploadHistory();
+  saveUploadCounter();
   pingHistory = [];
   pingResult = null;
   pingPrevStatus = 'unknown';
@@ -1706,6 +1734,10 @@ function saveUploadHistory() { try { localStorage.setItem('nm_upload_h', JSON.st
 function loadUploadHistory() { try { return JSON.parse(localStorage.getItem('nm_upload_h') || '[]'); } catch { return []; } }
 function savePingHistory()   { try { localStorage.setItem('nm_ping_h',   JSON.stringify(pingHistory));   } catch{} }
 function loadPingHistory()   { try { return JSON.parse(localStorage.getItem('nm_ping_h')   || '[]'); } catch { return []; } }
+function saveSpeedCounter()  { try { localStorage.setItem('nm_speed_cnt',  JSON.stringify({count: speedCountSinceStart,  windowTs: speedCountWindowStartTs}));  } catch{} }
+function loadSpeedCounter()  { try { return JSON.parse(localStorage.getItem('nm_speed_cnt')  || '{"count":0,"windowTs":0}'); } catch { return {count:0,windowTs:0}; } }
+function saveUploadCounter() { try { localStorage.setItem('nm_upload_cnt', JSON.stringify({count: uploadCountSinceStart, windowTs: uploadCountWindowStartTs})); } catch{} }
+function loadUploadCounter() { try { return JSON.parse(localStorage.getItem('nm_upload_cnt') || '{"count":0,"windowTs":0}'); } catch { return {count:0,windowTs:0}; } }
 
 // ═══════════════════════════════════════════════
 //  UTILS
