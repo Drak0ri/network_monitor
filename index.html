@@ -990,23 +990,28 @@ async function runUploadTest() {
   const critMbps = cfg.speedTest?.uploadCritMbps ?? 1;
   const uploadSize = 2 * 1024 * 1024; // 2 MB
 
-  // Build incompressible random payload
+  // Build random payload.
+  // Use text/plain;charset=UTF-8 as the Blob MIME type — this is a CORS
+  // "simple" content-type so the browser skips the preflight OPTIONS request.
+  // mode:'no-cors' lets fetch complete even if the server doesn't echo back
+  // Access-Control-Allow-Origin (we only need the timing, not the response).
+  // This matches how Cloudflare's own speed-test JS calls the endpoint.
   const data = new Uint8Array(uploadSize);
   for (let i = 0; i < uploadSize; i += 65536) {
     crypto.getRandomValues(data.subarray(i, Math.min(i + 65536, uploadSize)));
   }
-  const blob = new Blob([data]);
+  const blob = new Blob([data], { type: 'text/plain;charset=UTF-8' });
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 35000);
   const t0 = performance.now();
   try {
-    const resp = await fetch(UPLOAD_TEST_URL + '?_=' + Date.now(), {
+    await fetch(UPLOAD_TEST_URL + '?_=' + Date.now(), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: blob, cache: 'no-store', signal: ctrl.signal
+      body: blob,
+      signal: ctrl.signal,
+      mode: 'no-cors'   // opaque response — timing is still accurate
     });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     clearTimeout(timer);
     const ms = performance.now() - t0;
     const speedMbps = parseFloat(((uploadSize * 8) / (ms / 1000) / 1_000_000).toFixed(2));
