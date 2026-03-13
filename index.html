@@ -229,6 +229,35 @@
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: var(--bg2); }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ── SPEED TEST ── */
+    .speed-card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px 20px;
+    }
+    .speed-card.up       { border-color: rgba(34,197,94,.35); }
+    .speed-card.slow     { border-color: rgba(245,158,11,.45); }
+    .speed-card.critical { border-color: rgba(239,68,68,.45); }
+    .speed-card.down,
+    .speed-card.timeout  { border-color: rgba(220,38,38,.45); }
+    .speed-card.checking { opacity: .7; }
+    .speed-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
+    .speed-name { font-weight: 700; font-size: .95rem; }
+    .speed-sub  { font-size: .72rem; color: var(--txt2); margin-top: 2px; }
+    .speed-val-row { display: flex; align-items: baseline; gap: 6px; margin: 8px 0 4px; }
+    .speed-val  { font-size: 2.4rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+    .speed-val.up       { color: var(--up); }
+    .speed-val.slow     { color: var(--slow); }
+    .speed-val.critical { color: var(--crit); }
+    .speed-val.down,
+    .speed-val.timeout  { color: var(--down); }
+    .speed-val.unknown  { color: var(--unk); }
+    .speed-unit { font-size: .9rem; color: var(--txt2); }
+    .speed-label { font-size: .7rem; color: var(--txt3); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 2px; }
+    .speed-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: .72rem; color: var(--txt3); }
+    .speed-disabled-msg { font-size: .82rem; color: var(--txt3); padding: 8px 0; }
+
+    .btn.speed-on  { background: rgba(99,102,241,.2); border-color: var(--accent); color: var(--accent); }
   </style>
 </head>
 <body>
@@ -246,6 +275,7 @@
     <span style="font-size:.72rem;color:var(--txt3)" id="timerTxt"></span>
     <button class="btn" onclick="resetChecks()" title="Reset all check history to 0" style="font-size:.75rem;padding:.25rem .55rem">Reset Checks</button>
     <button class="btn" onclick="checkAllNow()">Check Now</button>
+    <button class="btn" id="speedTestBtn" onclick="toggleSpeedTest()">📶 Speed Test</button>
     <button class="btn" id="muteBtn" onclick="toggleMute()">🔔 Sound On</button>
     <button class="btn on" id="forceBtn" onclick="toggleForce()" style="display:none">⚡ Override</button>
   </div>
@@ -275,6 +305,38 @@
     <button class="btn" onclick="addTarget()" style="font-size:.75rem">+ Add Target</button>
   </div>
   <div class="grid" id="grid"></div>
+
+  <!-- DOWNLOAD SPEED TEST -->
+  <div id="speedSection" style="margin-bottom:20px">
+    <div class="sec-hdr" style="margin-bottom:12px">
+      <span class="sec-title">Download Speed</span>
+      <span style="font-size:.72rem;color:var(--txt3)" id="speedLastCheck"></span>
+    </div>
+    <div class="speed-card unknown" id="speedCard">
+      <div class="speed-head">
+        <div>
+          <div class="speed-name">Download Speed Test</div>
+          <div class="speed-sub" id="speedSub">Downloads ~4 MB from Cloudflare to measure real-world throughput</div>
+        </div>
+        <span class="badge unknown" id="speedBadge">UNKNOWN</span>
+      </div>
+      <div class="speed-val-row">
+        <span class="speed-val unknown" id="speedVal">—</span>
+        <span class="speed-unit">Mbps</span>
+      </div>
+      <div class="stats-row" id="speedStatsRow">
+        <div class="stat"><span class="stat-lbl">Min</span><span class="stat-val" id="speedStatMin">—</span></div>
+        <div class="stat"><span class="stat-lbl">Avg</span><span class="stat-val" id="speedStatAvg">—</span></div>
+        <div class="stat"><span class="stat-lbl">Max</span><span class="stat-val" id="speedStatMax">—</span></div>
+        <div class="stat"><span class="stat-lbl">Tests</span><span class="stat-val" id="speedStatCount">0</span></div>
+      </div>
+      <div class="spark" id="speedSpark"></div>
+      <div class="speed-foot">
+        <span id="speedFootLeft"></span>
+        <span id="speedFootRight"></span>
+      </div>
+    </div>
+  </div>
 
   <!-- ALERT LOG -->
   <div class="sec-hdr">
@@ -361,6 +423,26 @@
         </p>
       </div>
 
+      <!-- SPEED TEST SETTINGS -->
+      <div class="sec-hdr" style="margin-top:16px">
+        <span class="sec-title">Download Speed Test</span>
+      </div>
+      <div class="sg">
+        <div class="sf">
+          <label class="sl">Enable Speed Test</label>
+          <input type="checkbox" id="sSpeedEnabled" onchange="saveSetting('speedEnabled',this.checked)" style="width:auto;margin-top:4px">
+        </div>
+        <div class="sf">
+          <label class="sl">Warn below (Mbps)</label>
+          <input class="si" type="number" id="sSpeedWarn" min="0.5" max="1000" step="0.5" onchange="saveSetting('speedWarnMbps',+this.value)">
+        </div>
+        <div class="sf">
+          <label class="sl">Critical below (Mbps)</label>
+          <input class="si" type="number" id="sSpeedCrit" min="0.1" max="1000" step="0.1" onchange="saveSetting('speedCritMbps',+this.value)">
+        </div>
+        <p style="font-size:.68rem;color:var(--txt3);margin:2px 0 0">Speed test runs alongside each check cycle. ~4 MB is downloaded from <code style="font-size:.65rem">speed.cloudflare.com</code> and immediately discarded — no data is stored remotely.</p>
+      </div>
+
       <div class="future-note">
         <h4>Planned Notifications</h4>
         Email alerts (EmailJS), Google Chat webhook, and local server push are planned for the next phase.
@@ -382,6 +464,7 @@ const DEFAULTS = {
   schedule: { startHour: 7, startMin: 0, endHour: 17, endMin: 30 },
   historyMax: 60,
   soundUrl: '',
+  speedTest: { enabled: true, warnMbps: 10, critMbps: 3 },
   targets: [
     { id: 'google',     name: 'Internet (Google)',     url: 'https://www.google.com',                          warnMs: 400,  critMs: 1500, timeoutMs: 8000,  note: '' },
     { id: 'cloudflare', name: 'Internet (Cloudflare)', url: 'https://1.1.1.1',                                warnMs: 200,  critMs: 800,  timeoutMs: 5000,  note: '' },
@@ -404,6 +487,14 @@ let checksInFlight = false;      // overlap guard — only one checkAll() runs a
 let lastCheckStartedAt = null;   // timestamp when last checkAll() began
 let lastCheckFinishedAt = null;  // timestamp when last checkAll() completed successfully
 let alertLog = loadAlerts();
+
+// ── SPEED TEST STATE ──────────────────────────────────────────────────────
+const SPEED_TEST_URL = 'https://speed.cloudflare.com/__down?bytes=4194304'; // 4 MB
+let speedResult = null;        // { speedMbps, bytes, durationMs, status, ts }
+let speedHistory = loadSpeedHistory();   // [{ speedMbps, status, ts }, …]
+let speedPrevStatus = speedHistory.length ? speedHistory[speedHistory.length-1].status : 'unknown';
+let speedTestInFlight = false;
+// ─────────────────────────────────────────────────────────────────────────
 
 // Per-target runtime data
 const td = {};
@@ -467,6 +558,8 @@ async function checkAll() {
   checksInFlight = true;
   lastCheckStartedAt = Date.now();
   document.querySelectorAll('.card').forEach(c => c.classList.add('checking'));
+  // Fire speed test in parallel — it manages its own inFlight guard
+  runSpeedTest();
   try {
     const results = await Promise.all(cfg.targets.map(t => checkOne(t)));
     results.forEach((r, i) => {
@@ -825,12 +918,201 @@ function toggleForce() {
 }
 
 // ═══════════════════════════════════════════════
+//  DOWNLOAD SPEED TEST
+// ═══════════════════════════════════════════════
+function toggleSpeedTest() {
+  if (!cfg.speedTest) cfg.speedTest = { enabled: true, warnMbps: 10, critMbps: 3 };
+  cfg.speedTest.enabled = !cfg.speedTest.enabled;
+  saveConfig();
+  renderSpeedCard();
+  renderSpeedToggleBtn();
+  // render settings checkbox if panel is open
+  const el = document.getElementById('sSpeedEnabled');
+  if (el) el.checked = cfg.speedTest.enabled;
+}
+
+function renderSpeedToggleBtn() {
+  const b = document.getElementById('speedTestBtn');
+  if (!b) return;
+  const on = cfg.speedTest?.enabled !== false;
+  b.textContent = on ? '📶 Speed Test ON' : '📶 Speed Test OFF';
+  b.classList.toggle('speed-on', on);
+}
+
+async function runSpeedTest() {
+  if (cfg.speedTest?.enabled === false) return;
+  if (speedTestInFlight) return;
+  speedTestInFlight = true;
+  const card = document.getElementById('speedCard');
+  if (card) card.classList.add('checking');
+
+  const warnMbps = cfg.speedTest?.warnMbps ?? 10;
+  const critMbps = cfg.speedTest?.critMbps ?? 3;
+  const ctrl = new AbortController();
+  const timeoutMs = 35000;
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const t0 = performance.now();
+  try {
+    const resp = await fetch(SPEED_TEST_URL + '&_=' + Date.now(), {
+      cache: 'no-store', signal: ctrl.signal
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const blob = await resp.blob();
+    clearTimeout(timer);
+    const ms = performance.now() - t0;
+    const bytes = blob.size;
+    const speedMbps = parseFloat(((bytes * 8) / (ms / 1000) / 1_000_000).toFixed(2));
+    const status = speedMbps < critMbps ? 'critical' : speedMbps < warnMbps ? 'slow' : 'up';
+    speedResult = { speedMbps, bytes, durationMs: Math.round(ms), status, ts: Date.now() };
+    _recordSpeedResult(status, speedMbps);
+  } catch(e) {
+    clearTimeout(timer);
+    const status = ctrl.signal.aborted ? 'timeout' : 'down';
+    speedResult = { speedMbps: null, bytes: 0, durationMs: null, status, ts: Date.now() };
+    _recordSpeedResult(status, null);
+  } finally {
+    speedTestInFlight = false;
+    if (card) card.classList.remove('checking');
+  }
+  renderSpeedCard();
+}
+
+function _recordSpeedResult(status, speedMbps) {
+  const prev = speedPrevStatus;
+  speedHistory.push({ speedMbps, status, ts: Date.now() });
+  if (speedHistory.length > cfg.historyMax) speedHistory = speedHistory.slice(-cfg.historyMax);
+  saveSpeedHistory();
+  speedPrevStatus = status;
+  if (prev !== 'unknown' && prev !== status) {
+    alert_({ name: 'Download Speed', id: '_speed' }, prev, status, null);
+  }
+}
+
+function renderSpeedCard() {
+  const card   = document.getElementById('speedCard');
+  const badge  = document.getElementById('speedBadge');
+  const valEl  = document.getElementById('speedVal');
+  const sub    = document.getElementById('speedSub');
+  const statMin = document.getElementById('speedStatMin');
+  const statAvg = document.getElementById('speedStatAvg');
+  const statMax = document.getElementById('speedStatMax');
+  const statCnt = document.getElementById('speedStatCount');
+  const spark  = document.getElementById('speedSpark');
+  const footL  = document.getElementById('speedFootLeft');
+  const footR  = document.getElementById('speedFootRight');
+  const lastEl = document.getElementById('speedLastCheck');
+  const section = document.getElementById('speedSection');
+  if (!card) return;
+
+  const enabled = cfg.speedTest?.enabled !== false;
+  if (section) section.style.display = '';
+
+  if (!enabled) {
+    card.className = 'speed-card unknown';
+    valEl.className = 'speed-val unknown';
+    valEl.textContent = '—';
+    badge.className = 'badge unknown';
+    badge.textContent = 'DISABLED';
+    if (sub) sub.textContent = 'Speed test is off — enable it via the 📶 button in the header or in Settings below.';
+    if (statMin) statMin.textContent = '—';
+    if (statAvg) statAvg.textContent = '—';
+    if (statMax) statMax.textContent = '—';
+    if (statCnt) statCnt.textContent = '—';
+    if (spark)  spark.innerHTML = '';
+    if (footL)  footL.textContent = '';
+    if (footR)  footR.textContent = '';
+    if (lastEl) lastEl.textContent = '';
+    renderSpeedToggleBtn();
+    return;
+  }
+
+  const warnMbps = cfg.speedTest?.warnMbps ?? 10;
+  const critMbps = cfg.speedTest?.critMbps ?? 3;
+  const status = speedResult?.status || (speedHistory.length ? speedHistory[speedHistory.length-1].status : 'unknown');
+
+  card.className = `speed-card ${status}`;
+  valEl.className = `speed-val ${status}`;
+
+  if (speedResult?.speedMbps != null) {
+    valEl.textContent = speedResult.speedMbps.toFixed(2);
+  } else if (status === 'timeout') {
+    valEl.textContent = 'Timeout';
+  } else if (status === 'down') {
+    valEl.textContent = 'Failed';
+  } else {
+    valEl.textContent = '—';
+  }
+
+  const statusLabel = { up:'GOOD', slow:'SLOW', critical:'CRITICAL', timeout:'TIMEOUT', down:'DOWN', unknown:'UNKNOWN' }[status] || status.toUpperCase();
+  badge.className = `badge ${status}`;
+  badge.textContent = statusLabel;
+
+  // Stats from history
+  const goodPts = speedHistory.filter(h => h.speedMbps != null && !['down','timeout'].includes(h.status));
+  if (goodPts.length) {
+    const vals = goodPts.map(h => h.speedMbps);
+    if (statMin) statMin.textContent = Math.min(...vals).toFixed(1) + ' Mbps';
+    if (statAvg) statAvg.textContent = (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) + ' Mbps';
+    if (statMax) statMax.textContent = Math.max(...vals).toFixed(1) + ' Mbps';
+  } else {
+    if (statMin) statMin.textContent = '—';
+    if (statAvg) statAvg.textContent = '—';
+    if (statMax) statMax.textContent = '—';
+  }
+  if (statCnt) statCnt.textContent = speedHistory.length;
+
+  // Sparkline
+  if (spark) spark.innerHTML = speedSparkline(speedHistory, warnMbps, critMbps);
+
+  // Footer
+  if (footL && speedResult?.ts) footL.textContent = `Last: ${timeAgo(speedResult.ts)}`;
+  else if (footL) footL.textContent = speedHistory.length ? `Last: ${timeAgo(speedHistory[speedHistory.length-1].ts)}` : '';
+  if (footR && speedResult?.durationMs != null) {
+    const mb = (speedResult.bytes / 1_048_576).toFixed(1);
+    footR.textContent = `${mb} MB in ${(speedResult.durationMs/1000).toFixed(1)}s`;
+  } else if (footR) footR.textContent = '';
+
+  if (lastEl && speedResult?.ts) lastEl.textContent = `Last: ${timeAgo(speedResult.ts)}`;
+  else if (lastEl) lastEl.textContent = '';
+
+  if (sub) sub.textContent = `Thresholds: warn < ${warnMbps} Mbps · critical < ${critMbps} Mbps · ~4 MB from Cloudflare, discarded after test`;
+  renderSpeedToggleBtn();
+}
+
+function speedSparkline(history, warnMbps, critMbps) {
+  if (history.length < 2) return `<svg viewBox="0 0 260 38"><text x="50%" y="55%" text-anchor="middle" fill="#4a5568" font-size="11">No data yet</text></svg>`;
+  const W=260, H=38, P=2;
+  const pts = history.slice(-60);
+  const vals = pts.map(p => p.speedMbps ?? 0);
+  const maxV = Math.max(...vals, warnMbps, 1);
+  const bw = Math.max(1, (W - P*2) / pts.length - 0.5);
+  const bars = pts.map((pt, i) => {
+    const v = pt.speedMbps ?? 0;
+    const h = Math.max(2, (v/maxV)*(H-P*2));
+    const x = P + i*((W-P*2)/pts.length);
+    const y = H - P - h;
+    const c = ['down','timeout'].includes(pt.status) ? '#dc2626'
+             : pt.status==='critical' ? '#ef4444'
+             : pt.status==='slow'     ? '#f59e0b'
+             : '#22c55e';
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" fill="${c}" rx="1"/>`;
+  }).join('');
+  const wY = (H - P - (warnMbps/maxV)*(H-P*2)).toFixed(1);
+  const cY = (H - P - (critMbps/maxV)*(H-P*2)).toFixed(1);
+  return `<svg viewBox="0 0 ${W} ${H}">
+    <line x1="${P}" y1="${wY}" x2="${W-P}" y2="${wY}" stroke="#f59e0b" stroke-width=".6" stroke-dasharray="3,2" opacity=".35"/>
+    <line x1="${P}" y1="${cY}" x2="${W-P}" y2="${cY}" stroke="#ef4444" stroke-width=".6" stroke-dasharray="3,2" opacity=".35"/>
+    ${bars}</svg>`;
+}
+
+// ═══════════════════════════════════════════════
 //  RENDER
 // ═══════════════════════════════════════════════
 function renderAll() {
   renderCards();
   renderOverall();
   renderSched();
+  renderSpeedCard();
   renderLog();
 }
 
@@ -992,6 +1274,10 @@ function renderSettings() {
   document.getElementById('sEnd').value      = `${p(cfg.schedule.endHour)}:${p(cfg.schedule.endMin)}`;
   document.getElementById('sHistory').value  = cfg.historyMax;
   document.getElementById('sSoundUrl').value = cfg.soundUrl || '';
+  const st = cfg.speedTest || DEFAULTS.speedTest;
+  document.getElementById('sSpeedEnabled').checked = st.enabled !== false;
+  document.getElementById('sSpeedWarn').value      = st.warnMbps ?? 10;
+  document.getElementById('sSpeedCrit').value      = st.critMbps ?? 3;
   document.getElementById('tblRows').innerHTML = cfg.targets.map((t,i) => `
     <div class="tbl-row">
       <input class="si" value="${esc(t.name)}"  onchange="updTarget(${i},'name',this.value)">
@@ -1023,6 +1309,22 @@ function saveSetting(k, v) {
     const label = document.getElementById('sSoundFileLabel');
     if (label) label.textContent = '';
   }
+  if (k === 'speedEnabled') {
+    if (!cfg.speedTest) cfg.speedTest = { enabled: true, warnMbps: 10, critMbps: 3 };
+    cfg.speedTest.enabled = !!v;
+    renderSpeedCard();
+    renderSpeedToggleBtn();
+  }
+  if (k === 'speedWarnMbps') {
+    if (!cfg.speedTest) cfg.speedTest = { enabled: true, warnMbps: 10, critMbps: 3 };
+    cfg.speedTest.warnMbps = +v;
+    renderSpeedCard();
+  }
+  if (k === 'speedCritMbps') {
+    if (!cfg.speedTest) cfg.speedTest = { enabled: true, warnMbps: 10, critMbps: 3 };
+    cfg.speedTest.critMbps = +v;
+    renderSpeedCard();
+  }
   saveConfig(); schedNext();
 }
 
@@ -1039,6 +1341,10 @@ function resetChecks() {
       saveHistory(t.id, td[t.id]);
     }
   });
+  speedHistory = [];
+  speedResult = null;
+  speedPrevStatus = 'unknown';
+  saveSpeedHistory();
   renderAll();
 }
 
@@ -1089,13 +1395,24 @@ function calcTrend(h) {
 // ═══════════════════════════════════════════════
 function saveConfig() { localStorage.setItem('nm_cfg', JSON.stringify(cfg)); }
 function loadConfig() {
-  try { const s=localStorage.getItem('nm_cfg'); if(s) return {...DEFAULTS,...JSON.parse(s)}; } catch{}
+  try {
+    const s = localStorage.getItem('nm_cfg');
+    if (s) {
+      const saved = JSON.parse(s);
+      // Deep-merge speedTest so new keys are inherited from DEFAULTS
+      const merged = { ...DEFAULTS, ...saved };
+      merged.speedTest = { ...DEFAULTS.speedTest, ...(saved.speedTest || {}) };
+      return merged;
+    }
+  } catch{}
   return JSON.parse(JSON.stringify(DEFAULTS));
 }
 function saveHistory(id,d) { localStorage.setItem(`nm_h_${id}`, JSON.stringify(d)); }
 function loadHistory(id)   { try{const s=localStorage.getItem(`nm_h_${id}`);return s?JSON.parse(s):null;}catch{return null;} }
 function saveAlerts()      { localStorage.setItem('nm_al', JSON.stringify(alertLog)); }
 function loadAlerts()      { try{return JSON.parse(localStorage.getItem('nm_al')||'[]');}catch{return[];} }
+function saveSpeedHistory() { try { localStorage.setItem('nm_speed_h', JSON.stringify(speedHistory)); } catch{} }
+function loadSpeedHistory() { try { return JSON.parse(localStorage.getItem('nm_speed_h') || '[]'); } catch { return []; } }
 
 // ═══════════════════════════════════════════════
 //  UTILS
@@ -1110,6 +1427,7 @@ function timeAgo(ts) {
 // ═══════════════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════════════
+renderSpeedToggleBtn();
 renderAll();
 setInterval(() => {
   if (testFlashUntil && Date.now() >= testFlashUntil) { testFlashUntil = 0; stopTabFlash(); }
