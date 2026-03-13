@@ -528,7 +528,7 @@
         </div>
         <div class="sf">
           <label class="sl">Interval (seconds)</label>
-          <input class="si" type="number" id="sPingInterval" min="5" max="3600" onchange="saveSetting('pingIntervalSec',+this.value)">
+          <input class="si" type="number" id="sPingInterval" min="1" max="3600" onchange="saveSetting('pingIntervalSec',+this.value)">
         </div>
         <div class="sf">
           <label class="sl">Warn above (ms)</label>
@@ -563,7 +563,7 @@ const DEFAULTS = {
   historyMax: 60,
   soundUrl: '',
   speedTest: { enabled: true, warnMbps: 10, critMbps: 3, uploadWarnMbps: 5, uploadCritMbps: 1 },
-  pingTest:  { enabled: true, intervalSec: 30, warnMs: 100, critMs: 400 },
+  pingTest:  { enabled: true, intervalSec: 1, warnMs: 100, critMs: 400 },
   targets: [
     { id: 'google',     name: 'Internet (Google)',     url: 'https://www.google.com',                          warnMs: 400,  critMs: 1500, timeoutMs: 8000,  note: '' },
     { id: 'cloudflare', name: 'Internet (Cloudflare)', url: 'https://1.1.1.1',                                warnMs: 200,  critMs: 800,  timeoutMs: 5000,  note: '' },
@@ -1094,7 +1094,7 @@ function schedulePingTest() {
   clearTimeout(pingTimer);
   if (cfg.pingTest?.enabled === false) return;
   if (!inSchedule() && !forced) return;
-  const ms = Math.max(5000, (cfg.pingTest?.intervalSec ?? 30) * 1000);
+  const ms = Math.max(1000, (cfg.pingTest?.intervalSec ?? 1) * 1000);
   pingTimer = setTimeout(runPingTest, ms);
 }
 
@@ -1546,7 +1546,7 @@ function renderSettings() {
   document.getElementById('sUploadCrit').value     = st.uploadCritMbps ?? 1;
   const pt = cfg.pingTest || DEFAULTS.pingTest;
   document.getElementById('sPingEnabled').checked  = pt.enabled !== false;
-  document.getElementById('sPingInterval').value   = pt.intervalSec ?? 30;
+  document.getElementById('sPingInterval').value   = pt.intervalSec ?? 1;
   document.getElementById('sPingWarn').value       = pt.warnMs ?? 100;
   document.getElementById('sPingCrit').value       = pt.critMs ?? 400;
   document.getElementById('tblRows').innerHTML = cfg.targets.map((t,i) => `
