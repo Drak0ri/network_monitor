@@ -294,7 +294,6 @@
     <span id="clockTxt" style="font-variant-numeric:tabular-nums"></span>
   </div>
   <div style="display:flex;align-items:center;gap:14px">
-    <span id="avgPingTxt" style="font-variant-numeric:tabular-nums"></span>
     <span id="nextEvt"></span>
   </div>
 </div>
@@ -314,10 +313,10 @@
   </div>
   <div class="grid" id="grid"></div>
 
-  <!-- DOWNLOAD / UPLOAD SPEEDS -->
+  <!-- SPEED & PING -->
   <div id="speedSection" style="margin-bottom:20px">
     <div class="sec-hdr" style="margin-bottom:12px">
-      <span class="sec-title">Download / Upload Speeds</span>
+      <span class="sec-title">Speed &amp; Ping</span>
     </div>
     <div class="grid">
 
@@ -372,6 +371,33 @@
         <div class="card-foot">
           <span id="ulFootLeft"></span>
           <span id="ulFootRight"></span>
+        </div>
+      </div>
+
+      <!-- Ping card -->
+      <div class="card unknown" id="pingCard">
+        <div class="card-head">
+          <div>
+            <div class="card-name">↔ Avg Ping</div>
+            <div class="card-url">Average latency across monitored targets</div>
+            <div class="card-note" id="pingNote"></div>
+          </div>
+          <span class="badge unknown" id="pingBadge">UNKNOWN</span>
+        </div>
+        <div class="lat-row">
+          <span class="lat-val unknown" id="pingVal">—</span>
+          <span class="lat-unit">ms</span>
+        </div>
+        <div class="stats-row">
+          <div class="stat"><span class="stat-lbl">Min</span><span class="stat-val" id="pingStatMin">—</span></div>
+          <div class="stat"><span class="stat-lbl">Avg</span><span class="stat-val" id="pingStatAvg">—</span></div>
+          <div class="stat"><span class="stat-lbl">Max</span><span class="stat-val" id="pingStatMax">—</span></div>
+          <div class="stat"><span class="stat-lbl">Tests</span><span class="stat-val" id="pingStatCount">—</span></div>
+        </div>
+        <div class="spark" id="pingSpark"></div>
+        <div class="card-foot">
+          <span id="pingFootLeft"></span>
+          <span id="pingFootRight"></span>
         </div>
       </div>
 
@@ -491,6 +517,30 @@
         <p style="font-size:.68rem;color:var(--txt3);margin:2px 0 0">Tests run sequentially alongside each check cycle. ~4 MB downloaded, ~2 MB uploaded from <code style="font-size:.65rem">speed.cloudflare.com</code> — discarded immediately, nothing stored remotely.</p>
       </div>
 
+      <!-- PING SETTINGS -->
+      <div class="sec-hdr" style="margin-top:16px">
+        <span class="sec-title">Ping Test</span>
+      </div>
+      <div class="sg">
+        <div class="sf">
+          <label class="sl">Enable Ping Card</label>
+          <input type="checkbox" id="sPingEnabled" onchange="saveSetting('pingEnabled',this.checked)" style="width:auto;margin-top:4px">
+        </div>
+        <div class="sf">
+          <label class="sl">Interval (seconds)</label>
+          <input class="si" type="number" id="sPingInterval" min="5" max="3600" onchange="saveSetting('pingIntervalSec',+this.value)">
+        </div>
+        <div class="sf">
+          <label class="sl">Warn above (ms)</label>
+          <input class="si" type="number" id="sPingWarn" min="10" max="10000" onchange="saveSetting('pingWarnMs',+this.value)">
+        </div>
+        <div class="sf">
+          <label class="sl">Critical above (ms)</label>
+          <input class="si" type="number" id="sPingCrit" min="10" max="10000" onchange="saveSetting('pingCritMs',+this.value)">
+        </div>
+        <p style="font-size:.68rem;color:var(--txt3);margin:2px 0 0">Runs HEAD requests to all monitored targets on its own timer and averages the results. Independent of the main check interval.</p>
+      </div>
+
       <div class="future-note">
         <h4>Planned Notifications</h4>
         Email alerts (EmailJS), Google Chat webhook, and local server push are planned for the next phase.
@@ -513,6 +563,7 @@ const DEFAULTS = {
   historyMax: 60,
   soundUrl: '',
   speedTest: { enabled: true, warnMbps: 10, critMbps: 3, uploadWarnMbps: 5, uploadCritMbps: 1 },
+  pingTest:  { enabled: true, intervalSec: 30, warnMs: 100, critMs: 400 },
   targets: [
     { id: 'google',     name: 'Internet (Google)',     url: 'https://www.google.com',                          warnMs: 400,  critMs: 1500, timeoutMs: 8000,  note: '' },
     { id: 'cloudflare', name: 'Internet (Cloudflare)', url: 'https://1.1.1.1',                                warnMs: 200,  critMs: 800,  timeoutMs: 5000,  note: '' },
@@ -547,6 +598,11 @@ let uploadResult       = null;  // { speedMbps, bytes, durationMs, status, ts }
 let uploadHistory      = loadUploadHistory();
 let uploadPrevStatus   = uploadHistory.length ? uploadHistory[uploadHistory.length-1].status : 'unknown';
 let uploadTestInFlight = false;
+let pingResult         = null;  // { ms, status, ts }
+let pingHistory        = loadPingHistory();
+let pingPrevStatus     = pingHistory.length ? pingHistory[pingHistory.length-1].status : 'unknown';
+let pingTestInFlight   = false;
+let pingTimer          = null;
 // ─────────────────────────────────────────────────────────────────────────
 
 // Per-target runtime data
@@ -998,6 +1054,56 @@ async function runSpeedTests() {
   await runUploadTest();
 }
 
+// ── PING TEST ────────────────────────────────────────────────────────────────
+async function runPingTest() {
+  if (cfg.pingTest?.enabled === false) return;
+  if (pingTestInFlight) return;
+  pingTestInFlight = true;
+  const warnMs = cfg.pingTest?.warnMs ?? 100;
+  const critMs = cfg.pingTest?.critMs ?? 400;
+  try {
+    if (!cfg.targets.length) throw new Error('no targets');
+    const results = await Promise.all(cfg.targets.map(t => checkOne(t)));
+    const good = results.filter(r => r.latency != null && !['down','timeout'].includes(r.status));
+    if (!good.length) {
+      pingResult = { ms: null, status: 'down', ts: Date.now() };
+      _recordPingResult('down', null);
+    } else {
+      const ms = Math.round(good.reduce((a, r) => a + r.latency, 0) / good.length);
+      const status = ms >= critMs ? 'critical' : ms >= warnMs ? 'slow' : 'up';
+      pingResult = { ms, status, ts: Date.now() };
+      _recordPingResult(status, ms);
+    }
+  } catch(e) {
+    pingResult = { ms: null, status: 'down', ts: Date.now() };
+    _recordPingResult('down', null);
+  } finally {
+    pingTestInFlight = false;
+  }
+  renderSpeedCard();
+  schedulePingTest();  // reschedule after completion
+}
+
+function schedulePingTest() {
+  clearTimeout(pingTimer);
+  if (cfg.pingTest?.enabled === false) return;
+  if (!inSchedule() && !forced) return;
+  const ms = Math.max(5000, (cfg.pingTest?.intervalSec ?? 30) * 1000);
+  pingTimer = setTimeout(runPingTest, ms);
+}
+
+function _recordPingResult(status, ms) {
+  const prev = pingPrevStatus;
+  pingHistory.push({ ms, status, ts: Date.now() });
+  if (pingHistory.length > cfg.historyMax) pingHistory = pingHistory.slice(-cfg.historyMax);
+  savePingHistory();
+  pingPrevStatus = status;
+  if (prev !== 'unknown' && prev !== status) {
+    alert_({ name: 'Avg Ping', id: '_ping' }, prev, status, ms);
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function runUploadTest() {
   if (cfg.speedTest?.enabled === false) return;
   if (uploadTestInFlight) return;
@@ -1110,32 +1216,49 @@ const _SLABEL = { up:'GOOD', slow:'SLOW', critical:'CRITICAL', timeout:'TIMEOUT'
 
 function renderSpeedCard() {
   if (!document.getElementById('speedSection')) return;
-  const enabled = cfg.speedTest?.enabled !== false;
+  const speedEnabled = cfg.speedTest?.enabled !== false;
   const dlWarn = cfg.speedTest?.warnMbps       ?? 10;
   const dlCrit = cfg.speedTest?.critMbps       ?? 3;
   const ulWarn = cfg.speedTest?.uploadWarnMbps ?? 5;
   const ulCrit = cfg.speedTest?.uploadCritMbps ?? 1;
+  const pingEnabled = cfg.pingTest?.enabled !== false;
+  const pWarn = cfg.pingTest?.warnMs ?? 100;
+  const pCrit = cfg.pingTest?.critMs ?? 400;
 
   _renderOneSpeedCard({
     cardId: 'dlCard', valId: 'dlVal', badgeId: 'dlBadge', noteId: 'dlNote',
     minId: 'dlStatMin', avgId: 'dlStatAvg', maxId: 'dlStatMax', cntId: 'dlStatCount',
     sparkId: 'dlSpark', footLId: 'dlFootLeft', footRId: 'dlFootRight',
     result: speedResult, history: speedHistory,
-    warnMbps: dlWarn, critMbps: dlCrit, enabled
+    warnVal: dlWarn, critVal: dlCrit, enabled: speedEnabled
   });
   _renderOneSpeedCard({
     cardId: 'ulCard', valId: 'ulVal', badgeId: 'ulBadge', noteId: 'ulNote',
     minId: 'ulStatMin', avgId: 'ulStatAvg', maxId: 'ulStatMax', cntId: 'ulStatCount',
     sparkId: 'ulSpark', footLId: 'ulFootLeft', footRId: 'ulFootRight',
     result: uploadResult, history: uploadHistory,
-    warnMbps: ulWarn, critMbps: ulCrit, enabled
+    warnVal: ulWarn, critVal: ulCrit, enabled: speedEnabled
+  });
+  _renderOneSpeedCard({
+    cardId: 'pingCard', valId: 'pingVal', badgeId: 'pingBadge', noteId: 'pingNote',
+    minId: 'pingStatMin', avgId: 'pingStatAvg', maxId: 'pingStatMax', cntId: 'pingStatCount',
+    sparkId: 'pingSpark', footLId: 'pingFootLeft', footRId: 'pingFootRight',
+    result: pingResult, history: pingHistory,
+    warnVal: pWarn, critVal: pCrit, enabled: pingEnabled,
+    valueKey: 'ms', unit: 'ms',
+    valFmt: v => Math.round(v).toString(),
+    statFmt: v => Math.round(v) + ' ms',
+    higherIsBetter: false
   });
   renderSpeedToggleBtn();
 }
 
 function _renderOneSpeedCard({ cardId, valId, badgeId, noteId,
     minId, avgId, maxId, cntId, sparkId, footLId, footRId,
-    result, history, warnMbps, critMbps, enabled }) {
+    result, history, warnVal, critVal, enabled,
+    valueKey = 'speedMbps', unit = 'Mbps', valFmt = v => v.toFixed(2),
+    statFmt = v => v.toFixed(1) + ' ' + unit, noteText = null,
+    higherIsBetter = true }) {
   const card  = document.getElementById(cardId);  if (!card) return;
   const valEl = document.getElementById(valId);
   const badge = document.getElementById(badgeId);
@@ -1146,7 +1269,7 @@ function _renderOneSpeedCard({ cardId, valId, badgeId, noteId,
     card.className       = 'card unknown';
     valEl.className      = 'lat-val unknown';  valEl.textContent  = '—';
     badge.className      = 'badge unknown';    badge.textContent  = 'DISABLED';
-    if (note)            note.textContent     = 'Enable via the 📶 button in the header or Settings.';
+    if (note)            note.textContent     = 'Enable in Settings.';
     ['min','avg','max'].forEach(k => { const el=g(k==='min'?minId:k==='avg'?avgId:maxId); if(el) el.textContent='—'; });
     const cnt = g(cntId); if (cnt) cnt.textContent = '—';
     const sp  = g(sparkId); if (sp) sp.innerHTML = '';
@@ -1158,19 +1281,20 @@ function _renderOneSpeedCard({ cardId, valId, badgeId, noteId,
   const status = result?.status || (history.length ? history[history.length-1].status : 'unknown');
   card.className  = `card ${status}`;
   valEl.className = `lat-val ${status}`;
-  valEl.textContent = result?.speedMbps != null ? result.speedMbps.toFixed(2)
+  const curVal = result?.[valueKey];
+  valEl.textContent = curVal != null ? valFmt(curVal)
     : status === 'timeout' ? 'Timeout' : status === 'down' ? 'Failed' : '—';
   badge.className   = `badge ${status}`;
   badge.textContent = _SLABEL[status] || status.toUpperCase();
 
   // Stats
-  const good = history.filter(h => h.speedMbps != null && !['down','timeout'].includes(h.status));
+  const good = history.filter(h => h[valueKey] != null && !['down','timeout'].includes(h.status));
   const minEl = g(minId), avgEl = g(avgId), maxEl = g(maxId), cntEl = g(cntId);
   if (good.length) {
-    const v = good.map(h => h.speedMbps);
-    if (minEl) minEl.textContent = Math.min(...v).toFixed(1) + ' Mbps';
-    if (avgEl) avgEl.textContent = (v.reduce((a,b)=>a+b,0)/v.length).toFixed(1) + ' Mbps';
-    if (maxEl) maxEl.textContent = Math.max(...v).toFixed(1) + ' Mbps';
+    const v = good.map(h => h[valueKey]);
+    if (minEl) minEl.textContent = statFmt(Math.min(...v));
+    if (avgEl) avgEl.textContent = statFmt(v.reduce((a,b)=>a+b,0)/v.length);
+    if (maxEl) maxEl.textContent = statFmt(Math.max(...v));
   } else {
     [minEl, avgEl, maxEl].forEach(el => { if (el) el.textContent = '—'; });
   }
@@ -1178,10 +1302,12 @@ function _renderOneSpeedCard({ cardId, valId, badgeId, noteId,
 
   // Sparkline
   const sp = g(sparkId);
-  if (sp) sp.innerHTML = speedSparkline(history, warnMbps, critMbps);
+  if (sp) sp.innerHTML = speedSparkline(history, warnVal, critVal, valueKey, higherIsBetter);
 
   // Note (thresholds)
-  if (note) note.textContent = `warn < ${warnMbps} Mbps · critical < ${critMbps} Mbps`;
+  if (note) note.textContent = noteText || (higherIsBetter
+    ? `warn < ${warnVal} ${unit} · critical < ${critVal} ${unit}`
+    : `warn > ${warnVal} ${unit} · critical > ${critVal} ${unit}`);
 
   // Footer
   const lastTs = result?.ts || (history.length ? history[history.length-1].ts : null);
@@ -1191,15 +1317,19 @@ function _renderOneSpeedCard({ cardId, valId, badgeId, noteId,
     ? `${(result.bytes/1_048_576).toFixed(1)} MB in ${(result.durationMs/1000).toFixed(1)}s` : '';
 }
 
-function speedSparkline(history, warnMbps, critMbps) {
+function speedSparkline(history, warnVal, critVal, valueKey = 'speedMbps', higherIsBetter = true) {
   if (history.length < 2) return `<svg viewBox="0 0 260 38"><text x="50%" y="55%" text-anchor="middle" fill="#4a5568" font-size="11">No data yet</text></svg>`;
   const W=260, H=38, P=2;
   const pts = history.slice(-60);
-  const vals = pts.map(p => p.speedMbps ?? 0);
-  const maxV = Math.max(...vals, warnMbps, 1);
+  const vals = pts.map(p => p[valueKey] ?? 0);
+  // For higher-is-better (speed): show warn/crit as lower thresholds → scale to max(vals, warnVal)
+  // For lower-is-better (ping):   show warn/crit as upper thresholds → scale to max(vals, critVal)
+  const maxV = higherIsBetter
+    ? Math.max(...vals, warnVal, 1)
+    : Math.max(...vals, critVal, 1);
   const bw = Math.max(1, (W - P*2) / pts.length - 0.5);
   const bars = pts.map((pt, i) => {
-    const v = pt.speedMbps ?? 0;
+    const v = pt[valueKey] ?? 0;
     const h = Math.max(2, (v/maxV)*(H-P*2));
     const x = P + i*((W-P*2)/pts.length);
     const y = H - P - h;
@@ -1209,8 +1339,8 @@ function speedSparkline(history, warnMbps, critMbps) {
              : '#22c55e';
     return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" fill="${c}" rx="1"/>`;
   }).join('');
-  const wY = (H - P - (warnMbps/maxV)*(H-P*2)).toFixed(1);
-  const cY = (H - P - (critMbps/maxV)*(H-P*2)).toFixed(1);
+  const wY = (H - P - (warnVal/maxV)*(H-P*2)).toFixed(1);
+  const cY = (H - P - (critVal/maxV)*(H-P*2)).toFixed(1);
   return `<svg viewBox="0 0 ${W} ${H}">
     <line x1="${P}" y1="${wY}" x2="${W-P}" y2="${wY}" stroke="#f59e0b" stroke-width=".6" stroke-dasharray="3,2" opacity=".35"/>
     <line x1="${P}" y1="${cY}" x2="${W-P}" y2="${cY}" stroke="#ef4444" stroke-width=".6" stroke-dasharray="3,2" opacity=".35"/>
@@ -1255,14 +1385,6 @@ function renderOverall() {
   }
 }
 
-function calcAvgPing() {
-  const vals = cfg.targets
-    .map(t => td[t.id])
-    .filter(d => d && d.latency != null && !['down','timeout'].includes(d.status))
-    .map(d => d.latency);
-  return vals.length ? Math.round(vals.reduce((a,b) => a+b, 0) / vals.length) : null;
-}
-
 function renderSched() {
   const bar   = document.getElementById('schedBar');
   const sEl   = document.getElementById('schedStatus');
@@ -1270,17 +1392,10 @@ function renderSched() {
   const nxt   = document.getElementById('nextEvt');
   const ban   = document.getElementById('pauseBanner');
   const fBtn  = document.getElementById('forceBtn');
-  const pingEl = document.getElementById('avgPingTxt');
   const days  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const now   = new Date();
   clk.textContent = `${days[now.getDay()]} ${now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`;
   nxt.textContent = nextEvent();
-  if (pingEl) {
-    const avg = calcAvgPing();
-    pingEl.textContent = avg != null ? `Avg ping: ${avg} ms` : '';
-    const c = avg == null ? '' : avg >= 1000 ? 'color:var(--down)' : avg >= 400 ? 'color:var(--slow)' : 'color:var(--txt2)';
-    pingEl.style.cssText = `font-size:.72rem;${c}`;
-  }
   if (inSchedule()) {
     bar.className = 'sched-bar';
     sEl.textContent = `✓ Monitoring active — Mon–Fri ${p(cfg.schedule.startHour)}:${p(cfg.schedule.startMin)}–${p(cfg.schedule.endHour)}:${p(cfg.schedule.endMin)}`;
@@ -1407,6 +1522,11 @@ function renderSettings() {
   document.getElementById('sSpeedCrit').value      = st.critMbps ?? 3;
   document.getElementById('sUploadWarn').value     = st.uploadWarnMbps ?? 5;
   document.getElementById('sUploadCrit').value     = st.uploadCritMbps ?? 1;
+  const pt = cfg.pingTest || DEFAULTS.pingTest;
+  document.getElementById('sPingEnabled').checked  = pt.enabled !== false;
+  document.getElementById('sPingInterval').value   = pt.intervalSec ?? 30;
+  document.getElementById('sPingWarn').value       = pt.warnMs ?? 100;
+  document.getElementById('sPingCrit').value       = pt.critMs ?? 400;
   document.getElementById('tblRows').innerHTML = cfg.targets.map((t,i) => `
     <div class="tbl-row">
       <input class="si" value="${esc(t.name)}"  onchange="updTarget(${i},'name',this.value)">
@@ -1464,6 +1584,27 @@ function saveSetting(k, v) {
     cfg.speedTest.uploadCritMbps = +v;
     renderSpeedCard();
   }
+  if (k === 'pingEnabled') {
+    if (!cfg.pingTest) cfg.pingTest = { ...DEFAULTS.pingTest };
+    cfg.pingTest.enabled = !!v;
+    renderSpeedCard();
+    schedulePingTest();
+  }
+  if (k === 'pingIntervalSec') {
+    if (!cfg.pingTest) cfg.pingTest = { ...DEFAULTS.pingTest };
+    cfg.pingTest.intervalSec = +v;
+    schedulePingTest();
+  }
+  if (k === 'pingWarnMs') {
+    if (!cfg.pingTest) cfg.pingTest = { ...DEFAULTS.pingTest };
+    cfg.pingTest.warnMs = +v;
+    renderSpeedCard();
+  }
+  if (k === 'pingCritMs') {
+    if (!cfg.pingTest) cfg.pingTest = { ...DEFAULTS.pingTest };
+    cfg.pingTest.critMs = +v;
+    renderSpeedCard();
+  }
   saveConfig(); schedNext();
 }
 
@@ -1488,6 +1629,10 @@ function resetChecks() {
   uploadResult = null;
   uploadPrevStatus = 'unknown';
   saveUploadHistory();
+  pingHistory = [];
+  pingResult = null;
+  pingPrevStatus = 'unknown';
+  savePingHistory();
   renderAll();
 }
 
@@ -1545,6 +1690,7 @@ function loadConfig() {
       // Deep-merge speedTest so new keys are inherited from DEFAULTS
       const merged = { ...DEFAULTS, ...saved };
       merged.speedTest = { ...DEFAULTS.speedTest, ...(saved.speedTest || {}) };
+      merged.pingTest  = { ...DEFAULTS.pingTest,  ...(saved.pingTest  || {}) };
       return merged;
     }
   } catch{}
@@ -1558,6 +1704,8 @@ function saveSpeedHistory()  { try { localStorage.setItem('nm_speed_h',  JSON.st
 function loadSpeedHistory()  { try { return JSON.parse(localStorage.getItem('nm_speed_h')  || '[]'); } catch { return []; } }
 function saveUploadHistory() { try { localStorage.setItem('nm_upload_h', JSON.stringify(uploadHistory)); } catch{} }
 function loadUploadHistory() { try { return JSON.parse(localStorage.getItem('nm_upload_h') || '[]'); } catch { return []; } }
+function savePingHistory()   { try { localStorage.setItem('nm_ping_h',   JSON.stringify(pingHistory));   } catch{} }
+function loadPingHistory()   { try { return JSON.parse(localStorage.getItem('nm_ping_h')   || '[]'); } catch { return []; } }
 
 // ═══════════════════════════════════════════════
 //  UTILS
@@ -1617,6 +1765,7 @@ setInterval(() => {
 
 if (inSchedule()) {
   checkAll();
+  schedulePingTest();
 } else {
   document.getElementById('pauseBanner').className = 'pause-banner';
   document.getElementById('forceBtn').style.display = 'inline-block';
